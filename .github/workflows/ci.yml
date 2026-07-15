@@ -1,0 +1,194 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"] # release gate
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The supported floor is GCC 12 / Clang 16, established by running this matrix
+# rather than assumed. Every job here is blocking: red means something broke.
+#
+# Toolchains below the floor were tested and removed, for these reasons: GCC 10
+# cannot use std::array<entry<E,V>,N> as an NTTP (rejects it as non-structural,
+# so buildable<> by value fails), and GCC 11 / Clang 13-15 predate P2415R2
+# (views::all wrapping an rvalue range in owning_view), which the
+# entries()-composes-with-views guarantee depends on.
+#
+# Do not re-add them without re-establishing that those failures are gone.
+
+jobs:
+  linux-gcc:
+    name: gcc-${{ matrix.gcc }}
+    runs-on: ubuntu-latest
+    container: gcc:${{ matrix.gcc }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 12 is the proven floor: 11 fails entries()|views (pre-P2415R2
+        # libstdc++) and 10 additionally fails buildable<> by value.
+        gcc: [12, 13, 14, 15, 16]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-cmake
+      - run: g++ --version
+      - run: cmake -S . -B build -DTOTAL_MAP_TEST_MATRIX=ON
+      - run: cmake --build build -j
+      - run: ctest --test-dir build --output-on-failure
+
+  linux-clang:
+    name: clang-${{ matrix.clang }}-${{ matrix.stdlib }}
+    runs-on: ubuntu-latest
+    # NEVER use -bullseye tags: they ship CMake 3.18, below our 3.23 floor.
+    container: silkeh/clang:${{ matrix.clang }}
+    strategy:
+      fail-fast: false
+      # include-only: `include` cannot overwrite a value that is already a
+      # matrix axis -- it would create duplicate combinations instead.
+      matrix:
+        include:
+          # 16 is the proven floor: 15 and below fail entries()|views against
+          # their bundled libstdc++, which g++ 12 passes with -- a clang-side
+          # ranges limitation, not a standard-library one.
+          - { clang: 16, stdlib: libstdc++ }
+          - { clang: 17, stdlib: libstdc++ }
+          - { clang: 18, stdlib: libstdc++ }
+          - { clang: 19, stdlib: libstdc++ }
+          - { clang: 20, stdlib: libstdc++ }
+          - { clang: 21, stdlib: libstdc++ }
+          - { clang: 21, stdlib: libc++ }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/install-cmake
+      - run: clang++ --version
+      - name: Configure
+        run: |
+          FLAGS=""
+          if [ "${{ matrix.stdlib }}" = "libc++" ]; then FLAGS="-stdlib=libc++"; fi
+          cmake -S . -B build -DTOTAL_MAP_TEST_MATRIX=ON \
+            -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_CXX_FLAGS="$FLAGS"
+      - run: cmake --build build -j
+      - run: ctest --test-dir build --output-on-failure
+
+  linux-clang22:
+    # silkeh/clang has NO tag 22. Clang 22 ships preinstalled on ubuntu-26.04,
+    # which is still a PREVIEW image -- so this job carries some infrastructure
+    # risk. It is blocking anyway: the README claims Clang 22 support, and a
+    # claim CI does not gate is a claim CI does not prove. If the preview image
+    # becomes unreliable, drop the Clang 22 claim from the README at the same
+    # time as un-gating this job -- not before.
+    name: clang-22 (ubuntu-26.04 preview)
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: clang++-22 --version
+      - run: cmake -S . -B build -DTOTAL_MAP_TEST_MATRIX=ON -DCMAKE_CXX_COMPILER=clang++-22
+      - run: cmake --build build -j
+      - run: ctest --test-dir build --output-on-failure
+
+  linux-arm:
+    name: gcc-14 (arm64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - run: g++-14 --version
+      - run: cmake -S . -B build -DTOTAL_MAP_TEST_MATRIX=ON -DCMAKE_CXX_COMPILER=g++-14
+      - run: cmake --build build -j
+      - run: ctest --test-dir build --output-on-failure
+
+  macos:
+    name: ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    # Apple documents C++20 as partial (P0848R3 unsupported), which predicted
+    # trouble here. It passed on all three images anyway -- so this is blocking.
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-N is arm64; -intel is the only x86_64 coverage.
+        # macos-14 is deprecated (unsupported 2026-11-02); macos-13 is retired.
+        runner: [macos-15, macos-26, macos-15-intel]
+    steps:
+      - uses: actions/checkout@v4
+      - run: c++ --version
+      - run: cmake -S . -B build -DTOTAL_MAP_TEST_MATRIX=ON
+      - run: cmake --build build -j
+      - run: ctest --test-dir build --output-on-failure
+
+  windows:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    # MSVC had never been tested against this library before this matrix. The
+    # verdict: it works, and it is blocking from here on. The one blocker found
+    # was C4127 under /W4 /WX on an explicit row-count check in total_map.h;
+    # that check has since been removed altogether, superseded by the coverage
+    # and uniqueness checks, so nothing in the header depends on that fix now.
+    defaults:
+      run:
+        shell: bash # git bash: one shell across all platforms
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # windows-2022 is the ONLY way to get VS 2022 (MSVC 14.44, _MSC_VER 1944).
+          - { name: msvc-vs2022-x64, runner: windows-2022, arch: x64, toolset: msvc }
+          # windows-2025 serves Visual Studio 2026 as of June 2026. Toolset
+          # version unverified -- the configure step prints it.
+          - { name: msvc-vs2026-x64, runner: windows-2025, arch: x64, toolset: msvc }
+          - { name: msvc-vs2022-x86, runner: windows-2022, arch: Win32, toolset: msvc }
+          - { name: clang-cl, runner: windows-2022, arch: x64, toolset: ClangCL }
+          - { name: mingw-gcc, runner: windows-2025, arch: x64, toolset: mingw }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (MSVC / clang-cl)
+        if: matrix.toolset != 'mingw'
+        run: |
+          set -o pipefail
+          cmake -S . -B build -DTOTAL_MAP_TEST_MATRIX=ON \
+            -A ${{ matrix.arch }} \
+            -T ${{ matrix.toolset == 'ClangCL' && 'ClangCL' || 'host=x64' }} \
+            2>&1 | tee configure.log
+
+      - name: Configure (MinGW)
+        if: matrix.toolset == 'mingw'
+        run: |
+          set -o pipefail
+          g++ --version
+          cmake -S . -B build -DTOTAL_MAP_TEST_MATRIX=ON -G "MinGW Makefiles" \
+            2>&1 | tee configure.log
+
+      - name: Report toolset version
+        # The spec requires probing rather than assuming the toolset, since
+        # windows-latest silently became VS 2026. CMake's own compiler
+        # identification carries the MSVC version and needs no vcvars.
+        run: grep -i "compiler identification" configure.log || echo "no identification line found"
+
+      - run: cmake --build build --config Release -j
+      - run: ctest --test-dir build -C Release --output-on-failure
+
+  consumers:
+    # Nested CMake builds: expensive, and packaging is compiler-independent.
+    # One job per platform, not all 27.
+    name: consumers-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run consumer install-path tests
+        run: |
+          # `pwd -W` gives git bash a real Windows path (D:/a/...); plain `pwd`
+          # would give /d/a/..., which CMake cannot resolve.
+          SRC="$(pwd -W 2>/dev/null || pwd)"
+          WORK="$(dirname "$SRC")/consumer-work"
+          cmake -DSOURCE_DIR="$SRC" -DWORK_DIR="$WORK" -DCONFIG=Release \
+                -P cmake/run_consumer_tests.cmake
