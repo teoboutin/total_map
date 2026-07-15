@@ -1,0 +1,41 @@
+name: Install CMake
+description: >
+  Installs a pinned Kitware CMake into a container. The official gcc:* images
+  ship no CMake at all, and silkeh/clang's bundled version tracks its Debian
+  base (bullseye ships 3.18, below our 3.23 floor). Pinning one binary keeps
+  every container job identical.
+
+inputs:
+  version:
+    description: CMake version to install
+    required: false
+    default: "3.31.6"
+
+runs:
+  using: composite
+  steps:
+    - name: Install CMake ${{ inputs.version }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        apt-get update -qq
+        apt-get install -y -qq --no-install-recommends curl ca-certificates git
+        arch="$(uname -m)"   # x86_64 | aarch64 -- Kitware ships both
+        url="https://github.com/Kitware/CMake/releases/download/v${{ inputs.version }}/cmake-${{ inputs.version }}-linux-${arch}.tar.gz"
+        curl -fsSL "$url" -o /tmp/cmake.tar.gz
+        mkdir -p /opt/cmake
+        tar -xzf /tmp/cmake.tar.gz -C /opt/cmake --strip-components=1
+        echo "/opt/cmake/bin" >> "$GITHUB_PATH"
+
+    - name: Verify
+      shell: bash
+      run: |
+        set -euo pipefail
+        /opt/cmake/bin/cmake --version
+        # Must be >= 3.23 for target_sources(FILE_SET HEADERS).
+        ver="$(/opt/cmake/bin/cmake --version | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+        major="${ver%%.*}"; rest="${ver#*.}"; minor="${rest%%.*}"
+        if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 23 ]; }; then
+          echo "CMake $ver is too old for FILE_SET HEADERS (need >= 3.23)"; exit 1
+        fi
+        echo "CMake $ver OK"
