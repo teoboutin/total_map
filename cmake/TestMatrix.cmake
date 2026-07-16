@@ -43,6 +43,39 @@ function(total_map_add_test_matrix)
         endforeach()
     endforeach()
 
+    # --- exceptions disabled ---------------------------------------------
+    # The header must build with NO exception support. This is not hypothetical
+    # portability box-ticking: it is the regression gate for a bug that made the
+    # header UNUSABLE for any build passing -fno-exceptions (embedded, game,
+    # LLVM/Chromium-style, and opted-in Emscripten). The checks in make_perm
+    # used to be `throw`, and a throw-expression is ill-formed under
+    # -fno-exceptions even where it is never taken -- so instantiating make_perm
+    # failed and even a VALID table would not compile. See the emap::error block
+    # in total_map.h.
+    #
+    # Compiling tests/selftest.cpp is the whole proof, because it asserts both
+    # halves of the guarantee: valid tables construct (kBasic and friends), and
+    # emap::buildable<> still yields true/false rather than a hard error (the
+    # kMissing / kDuplicate / kOversized asserts).
+    #
+    # NOT MSVC (which sets MSVC=1 for clang-cl too): -fno-exceptions is a
+    # GCC/Clang spelling, and MSVC has no clean equivalent -- omitting /EHsc
+    # leaves throw compilable but with unwinding warnings, so it would not test
+    # the same thing. check_cxx_compiler_flag is deliberately not used to probe:
+    # clang-cl accepts unknown flags with only a warning, which the probe passes
+    # (the same trap documented on the standards loop above).
+    if(NOT MSVC)
+        add_executable(selftest_no_exceptions ${CMAKE_CURRENT_SOURCE_DIR}/tests/selftest.cpp)
+        target_link_libraries(selftest_no_exceptions PRIVATE emap::total_map)
+        set_target_properties(selftest_no_exceptions PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF)
+        target_compile_options(selftest_no_exceptions PRIVATE
+            -fno-exceptions -Wall -Wextra -Wpedantic -Werror)
+        add_test(NAME selftest.no_exceptions COMMAND selftest_no_exceptions)
+    endif()
+
     # Debug only - see tests/assert_death.cpp for why NDEBUG is not tested.
     add_executable(assert_death ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_death.cpp)
     target_link_libraries(assert_death PRIVATE emap::total_map)
@@ -51,9 +84,21 @@ function(total_map_add_test_matrix)
     # SIGABRT, which CTest reports as an "Exception" and WILL_FAIL does not
     # invert. The driver also asserts the message, proving the ASSERT fired
     # rather than any other kind of death. See cmake/run_death_test.cmake.
+    #
+    # The emulator must be forwarded: add_test() would apply it on its own, but
+    # the driver runs the binary itself, so it has to be told. Semicolons are
+    # escaped because an emulator may be a list (launcher + args), which would
+    # otherwise split into separate arguments to `cmake -P`. Empty natively.
+    set(death_emulator "")
+    if(CMAKE_CROSSCOMPILING_EMULATOR)
+        string(REPLACE ";" "\\;" escaped_emulator "${CMAKE_CROSSCOMPILING_EMULATOR}")
+        set(death_emulator "-DEMULATOR=${escaped_emulator}")
+    endif()
+
     add_test(NAME assert_death
         COMMAND ${CMAKE_COMMAND}
             -DEXE=$<TARGET_FILE:assert_death>
             -DEXPECT=key out of range
+            ${death_emulator}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_death_test.cmake)
 endfunction()
