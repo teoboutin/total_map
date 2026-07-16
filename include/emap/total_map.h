@@ -118,9 +118,11 @@
 //   * Correct size: the input array length must equal N (mismatch -> compile
 //     error) — a consequence of the two above rather than a separate check: too
 //     few rows leave an enumerator uncovered, and too many cannot all be
-//     distinct and in range. All three are enforced by a `throw` inside the
-//     consteval builder: a taken throw is not a constant expression, so it
-//     aborts compilation.
+//     distinct and in range. All three are enforced inside the consteval
+//     builder by calling a declared-but-undefined non-constexpr function: such
+//     a call is not a constant expression, so a taken check aborts compilation.
+//     (See emap::error below for why this rather than a `throw` — in short,
+//     -fno-exceptions.)
 //   * O(1) lookup; values are stored in enum order regardless of input order.
 //   * Keys are not stored, so no element can ever disagree with its own slot.
 //
@@ -372,6 +374,61 @@ namespace emap
 // never specializes this itself.
 template <class E> struct enum_count_policy;
 
+// ---------------------------------------------------------------------------
+// How a consteval check REPORTS a rejection.
+//
+// These are DECLARED AND NEVER DEFINED, and deliberately NOT constexpr. Calling
+// one is not a constant expression, so a taken check turns the consteval
+// evaluation in make_perm into a compile error. That is the whole mechanism.
+//
+// They are never defined because they are never called: make_perm is consteval,
+// so it is evaluated at compile time and emitted never. A call that survived to
+// runtime would be a link error naming the check that fired — a strictly better
+// failure than a silent one — but it cannot arise.
+//
+// WHY NOT `throw`, which reads more naturally and is the usual idiom?
+// Because a throw-expression is ILL-FORMED under -fno-exceptions EVEN WHERE IT
+// IS NEVER TAKEN: the diagnostic fires when make_perm is instantiated, not when
+// a check trips. That made the whole header unusable — not degraded, UNUSABLE —
+// for any build that passes -fno-exceptions, because even a VALID table failed
+// to compile. That is a real and self-selected population: embedded and
+// safety-critical toolchains, game engines, LLVM and Chromium themselves, and
+// Emscripten builds that opt in. It also skews toward exactly the people this
+// header is FOR — compile-time tables with no allocation and O(1) lookup are
+// what freestanding and wasm code reaches for. A library does not get to choose
+// this flag; its consumer does, and the failure was silent to the author.
+// (Note -fno-exceptions must be PASSED. It is not Emscripten's default: em++
+// compiles a throw-expression fine out of the box and only disables exception
+// CATCHING at runtime, which a consteval-only throw never reaches.)
+// A call to a non-constexpr function has neither problem: it is well-formed everywhere, and
+// it is "not a constant expression" for exactly the same reason a throw is, so
+// both properties this header depends on survive:
+//   * direct construction of a bad table stays a HARD ERROR, and
+//   * emap::buildable<> still sees a substitution failure and yields a clean
+//     `false` rather than aborting the TU.
+//
+// THE MESSAGE IS PASSED AS AN ARGUMENT and is not lost by doing so. A compiler
+// echoes the source line of the failing call, which is the SAME mechanism that
+// ever made a `throw`'s message visible — neither compiler prints the literal in
+// the diagnostic text proper. The function NAME is strictly better off: it rides
+// the diagnostic text itself, so it survives even with caret echo disabled,
+// where a throw's message vanished completely. So this reports MORE than the
+// throw did, not less: an identifier-shaped summary that always survives, plus
+// the free-form detail whenever source echo is on.
+//
+// Keep each message literal STARTING ON THE CALL'S OWN LINE: clang echoes only
+// the caret's physical line, so a message pushed onto the next line is not
+// shown. (g++ echoes the whole call range either way.) cmake/NegativeTests.cmake
+// already depends on this — its expected substrings must each lie within one
+// physical line for the same reason.
+// ---------------------------------------------------------------------------
+namespace error
+{
+void enum_key_out_of_range(const char* why);
+void duplicate_enum_key(const char* why);
+void enum_value_not_covered(const char* why);
+} // namespace error
+
 namespace detail
 {
 template <class E>
@@ -524,9 +581,9 @@ template <class E, class V> class total_map
     std::array<V, N> data_; // values only — keys were dropped after validation
 
     // Validate exhaustiveness/uniqueness/range and return, for each enum index,
-    // the input slot that holds it. A taken `throw` is not a constant
-    // expression, so any violation turns this consteval evaluation into a
-    // compile error.
+    // the input slot that holds it. A call to one of the emap::error functions
+    // is not a constant expression, so any violation turns this consteval
+    // evaluation into a compile error.
     //
     // There is deliberately NO `M != N` check, and a wrong row count is still
     // rejected — by the checks below, which report it more precisely:
@@ -537,7 +594,7 @@ template <class E, class V> class total_map
     //
     // So the accepted set is exactly the same as with an explicit count check;
     // only the diagnostic differs, and each check now names one concept. An
-    // earlier `if (M != N)` throw masked the coverage loop entirely (making it
+    // earlier `if (M != N)` check masked the coverage loop entirely (making it
     // unreachable), and answered a forgotten row with advice about `Count` and
     // stale counts — the trust-boundary caveat, aimed at someone who had simply
     // omitted a line.
@@ -549,14 +606,14 @@ template <class E, class V> class total_map
         for (std::size_t i = 0; i < M; ++i) {
             const std::size_t idx = static_cast<std::size_t>(in[i].key);
             if (idx >= N) {
-                throw "emap::total_map: enum key >= enum_count_v<E>. If that key is a real "
-                      "enumerator, N is too small: is the sentinel being read a real "
-                      "enumerator of your enum rather than a trailing sentinel, or has a "
-                      "hand-written emap::enum_count<E> gone stale? Specialize "
-                      "emap::enum_count<E>.";
+                error::enum_key_out_of_range("emap::total_map: enum key >= enum_count_v<E>. If that key is a real "
+                    "enumerator, N is too small: is the sentinel being read a real "
+                    "enumerator of your enum rather than a trailing sentinel, or has a "
+                    "hand-written emap::enum_count<E> gone stale? Specialize "
+                    "emap::enum_count<E>.");
             }
             if (seen[idx]) {
-                throw "emap::total_map: duplicate enum key";
+                error::duplicate_enum_key("emap::total_map: duplicate enum key");
             }
             seen[idx] = true;
             perm[idx] = i;
@@ -569,10 +626,10 @@ template <class E, class V> class total_map
                 // LARGE leaves a slot no row can fill. Only a hand-written
                 // count can go stale this way — a sentinel, read by the default
                 // rule or by a policy, tracks the enumerators by construction.
-                throw "emap::total_map: enum value not covered. Some enumerator has no row. "
-                      "If your table looks complete, N may be too large: has a hand-written "
-                      "emap::enum_count<E> gone stale? Specialize emap::enum_count<E> with "
-                      "the true count.";
+                error::enum_value_not_covered("emap::total_map: enum value not covered. Some enumerator has no row. "
+                    "If your table looks complete, N may be too large: has a hand-written "
+                    "emap::enum_count<E> gone stale? Specialize emap::enum_count<E> with "
+                    "the true count.");
             }
         }
         return perm;
@@ -686,15 +743,15 @@ total_map(entry<E, V>, Rest...) -> total_map<E, V>;
 // HOW IT WORKS
 //   It forces the consteval construction — `total_map(...)`, CTAD on the
 //   consteval constructor — into a template-argument position (the operand of
-//   std::bool_constant<...>), so a `throw` from make_perm during that evaluation
-//   is caught as a *substitution failure* — making the concept false — instead
-//   of a hard error.
+//   std::bool_constant<...>), so an emap::error call from make_perm during that
+//   evaluation is caught as a *substitution failure* — making the concept false
+//   — instead of a hard error.
 //
 //   The CONSTRUCTION must be the outermost call in that operand. Only the
 //   ARGUMENT may be computed by a helper (which is exactly what detail::
 //   deref_if_ptr does below, and why the by-pointer form costs nothing). Routing
 //   the CONSTRUCTION itself through another callable — wrapping the whole thing
-//   in a lambda, say — pushes the throw out of the immediate context.
+//   in a lambda, say — pushes the failure out of the immediate context.
 //
 //   That last point is not folklore; it is measured, and IMPLEMENTATIONS
 //   DISAGREE. Wrapping the construction in a lambda gives:
@@ -762,7 +819,7 @@ namespace detail
 {
 // Yields the array itself, or the array a pointer points at. This computes only
 // the ARGUMENT — total_map(...) stays the outermost call in the bool_constant
-// operand below, which is what keeps a throw from make_perm a substitution
+// operand below, which is what keeps a rejection from make_perm a substitution
 // failure. (Routing the CONSTRUCTION through a callable is the thing that
 // breaks, and breaks differently per compiler; see the note above.)
 template <class T> constexpr decltype(auto) deref_if_ptr(T x)

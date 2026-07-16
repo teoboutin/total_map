@@ -1,6 +1,12 @@
 # Driver for the assert death-test. Invoked via `cmake -P`.
 #
 # Required: -DEXE=<path to test binary> -DEXPECT=<substring of the assert message>
+# Optional: -DEMULATOR=<launcher> -- CMAKE_CROSSCOMPILING_EMULATOR, when the
+#   build is cross-compiling. add_test() applies that emulator automatically,
+#   but this driver runs the binary itself via execute_process, so it must be
+#   passed in and prepended by hand. Without it an Emscripten build tries to
+#   exec assert_death.js directly and dies with "Permission denied" -- a
+#   failure that looks like a death test but proves nothing. Empty natively.
 #
 # Why not CTest's WILL_FAIL: WILL_FAIL inverts a non-zero RETURN CODE, but an
 # assert() terminates via SIGABRT, which CTest classifies as an "Exception" and
@@ -16,7 +22,7 @@ if(NOT DEFINED EXE OR NOT DEFINED EXPECT)
 endif()
 
 execute_process(
-    COMMAND ${EXE}
+    COMMAND ${EMULATOR} ${EXE}
     RESULT_VARIABLE result
     OUTPUT_VARIABLE out
     ERROR_VARIABLE err)

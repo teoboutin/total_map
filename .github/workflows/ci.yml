@@ -90,6 +90,42 @@ jobs:
       - run: cmake --build build -j
       - run: ctest --test-dir build --output-on-failure
 
+  emscripten:
+    # em++/wasm, the toolchain that prompted the emap::error design (see the
+    # block in total_map.h). Two things are proven here that no other job can:
+    # the header works on a NON-NATIVE target, and it works under the exact
+    # compiler that -fno-exceptions users on the web reach for.
+    #
+    # Note -fno-exceptions is NOT Emscripten's default -- em++ compiles a
+    # throw-expression out of the box and only disables exception CATCHING at
+    # runtime, which a consteval-only throw never reaches. So the `throw` this
+    # header used to carry built fine under em++ defaults; it broke only when a
+    # user passed -fno-exceptions. That is why this job runs the FULL matrix
+    # rather than a bare default build: selftest.no_exceptions is the cell that
+    # would have caught the bug, and a default-flags build alone would not.
+    #
+    # Runs the tests rather than only compiling them: the emsdk toolchain sets
+    # CMAKE_CROSSCOMPILING_EMULATOR to node, so ctest executes the wasm through
+    # it. The assert_death driver runs its binary itself and so is handed that
+    # emulator explicitly -- see cmake/TestMatrix.cmake.
+    #
+    # No install-cmake here, deliberately: that action apt-gets a pinned CMake
+    # as root INTO A CONTAINER, and this job has none -- on a bare runner the
+    # apt-get fails outright. The runner image already ships CMake well above
+    # our 3.23 floor, which is why the other container-less jobs (linux-arm,
+    # clang-22, macos) do not use it either.
+    name: em++ (wasm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+      - run: em++ --version
+      - run: emcmake cmake -S . -B build -DTOTAL_MAP_TEST_MATRIX=ON
+      - run: cmake --build build -j
+      - run: ctest --test-dir build --output-on-failure
+
   linux-arm:
     name: gcc-14 (arm64)
     runs-on: ubuntu-24.04-arm
