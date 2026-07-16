@@ -54,6 +54,13 @@ failures to compile time and keeps lookup as fast as a raw array.
   `<iterator>`, `<type_traits>`, `<utility>`. Notably **not** `<ranges>` —
   `entries()` composes with it if you include it, but you never pay for it if
   you don't.
+- **No exception support needed.** The header builds and enforces every
+  guarantee under `-fno-exceptions` — common in embedded, safety-critical and
+  game builds, and available to Emscripten users who pass it. A rejected table
+  is reported by calling a declared-but-undefined `emap::error::` function —
+  not a constant expression, so it aborts the compile exactly as a `throw`
+  would, without requiring exceptions to be enabled. CI gates this on GCC,
+  Clang and em++/wasm.
 - [Supported compilers/platforms](#supported-toolchains)
 - The enum must have **contiguous underlying values `0..N-1`** — storage is
   indexed by `static_cast<size_t>(key)`.
