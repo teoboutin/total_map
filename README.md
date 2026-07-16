@@ -42,7 +42,8 @@ failures to compile time and keeps lookup as fast as a raw array.
 - **Right-sized** — an input length `!= N` is a compile error.
   ([one caveat on what "total" proves](#what-it-does-not-prove).)
 - **Order-independent** — rows may be authored in any order; values are stored
-  in enum order regardless.
+  in enum order regardless. Benefit: you can reorder the enumerators without
+  having to edit the map definition itself.
 - **No stored keys** — the key validates and places each row, then is dropped.
   Storage is a bare `std::array<V, N>`, so a value can never disagree with its
   slot and mutation is always safe.
