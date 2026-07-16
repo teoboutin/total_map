@@ -1,6 +1,7 @@
 # total_map
 
 [![CI](https://github.com/teoboutin/total_map/actions/workflows/ci.yml/badge.svg)](https://github.com/teoboutin/total_map/actions/workflows/ci.yml)
+[![Try it on Compiler Explorer](https://img.shields.io/badge/try_it-Compiler_Explorer-67c52a)](https://godbolt.org/z/K1K4vPbdP)
 
 A single-header, C++20, compile-time-checked **total map from an enum to values**.
 
