@@ -978,6 +978,79 @@ template <auto X>
 concept buildable =
     requires { typename std::bool_constant<(total_map(detail::deref_if_ptr(X)), true)>; };
 
+// ---------------------------------------------------------------------------
+// all_unique — an opt-in proof about the VALUE side of a table. Construction
+// proves properties of the keys; this proves that some projection of the
+// values (a stringId, a wire code, the values themselves) is collision-free:
+//
+//     static_assert(emap::all_unique(styles,
+//         [](const Style& s) { return std::string_view{s.stringId}; }));
+//
+// It is a plain consteval function, not a buildable-style NTTP concept,
+// because it needs no substitution-failure catching: the table is already
+// built, and asserting one more property of a constexpr object is an ordinary
+// constant expression. That also makes it negatable for free.
+//
+// The projection is a callable, or a pointer to a data member
+// (&Style::thickness) — the two forms std::invoke would accept, dispatched by
+// hand so this header does not buy <functional>. The one-argument overload
+// checks the values themselves.
+//
+// STRING-LIKE PROJECTIONS: project to std::string_view (include it yourself),
+// so equality means CONTENT. A raw `const char*` projection compares
+// ADDRESSES, and constant evaluation makes that loud rather than wrong, in
+// compiler-divergent ways: clang refuses ANY comparison of string-literal
+// addresses ("unspecified value"), while g++ and MSVC accept distinct-content
+// comparisons and refuse or pool same-content ones. Never a silent wrong
+// "unique" — but only the string_view form is portable, and it is also the
+// one that says what you mean.
+//
+// consteval, deliberately: this is a proof tool, usable only where the table
+// and projection are constants. A runtime uniqueness check would be a
+// different feature with different obligations. O(N^2) pairwise, which is
+// nothing at enumerator counts.
+// ---------------------------------------------------------------------------
+namespace detail
+{
+// std::invoke's two relevant forms, without <functional>.
+template <class Proj, class V> constexpr decltype(auto) project(Proj& proj, const V& v)
+{
+    if constexpr (std::is_member_object_pointer_v<Proj>) {
+        return v.*proj;
+    } else {
+        return proj(v);
+    }
+}
+
+template <class Proj, class V>
+concept projects_comparably = requires(Proj& proj, const V& v) {
+    { detail::project(proj, v) == detail::project(proj, v) } -> std::convertible_to<bool>;
+};
+} // namespace detail
+
+template <class E, class V, class Proj>
+    requires detail::projects_comparably<Proj, V>
+consteval bool all_unique(const total_map<E, V>& m, Proj proj)
+{
+    for (auto i = m.begin(); i != m.end(); ++i) {
+        for (auto j = m.begin(); j != i; ++j) {
+            if (detail::project(proj, *i) == detail::project(proj, *j)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+template <class E, class V>
+    requires requires(const V& v) {
+        { v == v } -> std::convertible_to<bool>;
+    }
+consteval bool all_unique(const total_map<E, V>& m)
+{
+    return all_unique(m, [](const V& v) -> const V& { return v; });
+}
+
 } // namespace emap
 
 // ============================================================================
@@ -1385,6 +1458,46 @@ template <class M, class F>
 concept transform_accepts = requires(const M& m, F& f) { m.transform(f); };
 static_assert(transform_accepts<emap::total_map<Color, int>, decltype(kTakesInt)>);
 static_assert(!transform_accepts<emap::total_map<Color, Style>, decltype(kTakesInt)>);
+
+// --- all_unique: prove uniqueness of a PROJECTION across all values ---
+// The coverage checks prove properties of the KEYS; this is the opt-in proof
+// for the value side — e.g. a stringId that must stay collision-free because
+// consumers parse against it.
+
+// a callable projection; string-like members are projected to string_view so
+// equality means CONTENT, with the consumer paying for <string_view>
+static_assert(emap::all_unique(kBasic, [](const Style& s) { return std::string_view{s.name}; }));
+constexpr emap::total_map kDupNames{
+    entry{Color::Red, Style{1, "x"}},
+    entry{Color::Green, Style{2, "x"}}, // same name, different thickness
+    entry{Color::Blue, Style{3, "z"}},
+};
+static_assert(!emap::all_unique(kDupNames, [](const Style& s) { return std::string_view{s.name}; }));
+
+// a pointer to data member works without <functional>
+static_assert(emap::all_unique(kDupNames, &Style::thickness));
+
+// A raw `const char*` projection (&Style::name) is deliberately NOT asserted
+// here: clang refuses ANY comparison of string-literal addresses in constant
+// evaluation ("unspecified value"), where g++ and MSVC accept distinct-content
+// ones — measured on clang 16, g++ 12.2 and MSVC 19.44. What holds on EVERY
+// toolchain is only that such a projection is never silently "unique":
+// it is a compile error or a reported duplicate, never a wrong pass. The
+// string_view projection above is the portable, content-meaning form.
+
+// identity overload: uniqueness of the values themselves
+static_assert(emap::all_unique(kCost));
+constexpr emap::total_map kDupCost{
+    entry{Color::Red, 1.0}, entry{Color::Green, 1.0}, entry{Color::Blue, 2.0}};
+static_assert(!emap::all_unique(kDupCost));
+
+// acceptance is a predicate: a projection whose result has no operator== is a
+// clean constraint failure (Weight has none)
+template <class M, class P>
+concept all_unique_accepts = requires(const M& m, P& p) { emap::all_unique(m, p); };
+constexpr auto kToWeight = [](const Weight& w) -> const Weight& { return w; };
+static_assert(!all_unique_accepts<emap::total_map<Color, Weight>, decltype(kToWeight)>);
+static_assert(all_unique_accepts<emap::total_map<Color, Style>, decltype(&Style::thickness)>);
 
 // --- rejection behavior, expressed as static_assert via emap::buildable ---
 // (entry<Color,int> is structural, so its arrays are valid template params.)
