@@ -119,7 +119,7 @@ required.
 
 ### Struct payloads
 
-There is no factory — CTAD deduces `E` and `V` from the rows:
+Rows need no factory — CTAD deduces `E` and `V` from them:
 
 ```cpp
 enum class Color { Red, Green, Blue, Count };
@@ -156,6 +156,26 @@ constexpr emap::total_map cost{
 
 static_assert(cost[Color::Red] == 1250.0);
 ```
+
+### Deriving from a function
+
+`total_map<E, V>::from(fn)` computes the table instead of authoring rows: `fn`
+is invoked once per enumerator, in enum order. There are no rows to get wrong —
+`fn` is total over `E` by its type, so exhaustiveness, uniqueness and order
+hold **by construction** rather than by check:
+
+```cpp
+constexpr auto brightness = emap::total_map<Color, int>::from(
+    [](Color c) { return static_cast<int>(c) * 40; });
+
+static_assert(brightness[Color::Blue] == 80);
+```
+
+The callable must return `V` itself (a cv/ref-qualified `V` is fine) —
+`from()` performs no conversions, mirroring row authoring, where `entry<E, V>`
+fixes each row's value type. Write `return 90.0;`, not `return 90;`, for a
+double map. Like every other construction path it is `consteval`: there is
+still no runtime population.
 
 ### Iterating
 
