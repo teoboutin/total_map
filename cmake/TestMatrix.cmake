@@ -19,27 +19,32 @@ function(total_map_add_test_matrix)
         endif()
 
         foreach(mode IN ITEMS debug ndebug)
-            set(target "selftest_cxx${std}_${mode}")
-            add_executable(${target} ${CMAKE_CURRENT_SOURCE_DIR}/tests/selftest.cpp)
-            target_link_libraries(${target} PRIVATE emap::total_map)
-            set_target_properties(${target} PROPERTIES
-                CXX_STANDARD ${std}
-                CXX_STANDARD_REQUIRED ON
-                CXX_EXTENSIONS OFF)
+            # Two TUs per cell: the flagship header standalone, and the
+            # mutable sibling (which transitively re-proves the flagship's
+            # selftests in a two-header TU).
+            foreach(tu IN ITEMS selftest selftest_mutable)
+                set(target "${tu}_cxx${std}_${mode}")
+                add_executable(${target} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${tu}.cpp)
+                target_link_libraries(${target} PRIVATE emap::total_map)
+                set_target_properties(${target} PROPERTIES
+                    CXX_STANDARD ${std}
+                    CXX_STANDARD_REQUIRED ON
+                    CXX_EXTENSIONS OFF)
 
-            if(mode STREQUAL "ndebug")
-                target_compile_definitions(${target} PRIVATE NDEBUG)
-            endif()
+                if(mode STREQUAL "ndebug")
+                    target_compile_definitions(${target} PRIVATE NDEBUG)
+                endif()
 
-            if(MSVC)
-                target_compile_options(${target} PRIVATE
-                    /W4 /WX /permissive- /Zc:preprocessor /Zc:__cplusplus /diagnostics:caret)
-            else()
-                target_compile_options(${target} PRIVATE
-                    -Wall -Wextra -Wpedantic -Werror)
-            endif()
+                if(MSVC)
+                    target_compile_options(${target} PRIVATE
+                        /W4 /WX /permissive- /Zc:preprocessor /Zc:__cplusplus /diagnostics:caret)
+                else()
+                    target_compile_options(${target} PRIVATE
+                        -Wall -Wextra -Wpedantic -Werror)
+                endif()
 
-            add_test(NAME selftest.cxx${std}.${mode} COMMAND ${target})
+                add_test(NAME ${tu}.cxx${std}.${mode} COMMAND ${target})
+            endforeach()
         endforeach()
     endforeach()
 
@@ -74,6 +79,17 @@ function(total_map_add_test_matrix)
         target_compile_options(selftest_no_exceptions PRIVATE
             -fno-exceptions -Wall -Wextra -Wpedantic -Werror)
         add_test(NAME selftest.no_exceptions COMMAND selftest_no_exceptions)
+
+        add_executable(selftest_mutable_no_exceptions
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/selftest_mutable.cpp)
+        target_link_libraries(selftest_mutable_no_exceptions PRIVATE emap::total_map)
+        set_target_properties(selftest_mutable_no_exceptions PROPERTIES
+            CXX_STANDARD 20
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF)
+        target_compile_options(selftest_mutable_no_exceptions PRIVATE
+            -fno-exceptions -Wall -Wextra -Wpedantic -Werror)
+        add_test(NAME selftest_mutable.no_exceptions COMMAND selftest_mutable_no_exceptions)
     endif()
 
     # Debug only - see tests/assert_death.cpp for why NDEBUG is not tested.
@@ -98,6 +114,18 @@ function(total_map_add_test_matrix)
     add_test(NAME assert_death
         COMMAND ${CMAKE_COMMAND}
             -DEXE=$<TARGET_FILE:assert_death>
+            -DEXPECT=key out of range
+            ${death_emulator}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_death_test.cmake)
+
+    # The mutable sibling's half: the forged key must assert on the NON-CONST
+    # operator[] too, and this binary is also the one runtime-thaw exercise.
+    add_executable(assert_death_mutable ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_death_mutable.cpp)
+    target_link_libraries(assert_death_mutable PRIVATE emap::total_map)
+
+    add_test(NAME assert_death_mutable
+        COMMAND ${CMAKE_COMMAND}
+            -DEXE=$<TARGET_FILE:assert_death_mutable>
             -DEXPECT=key out of range
             ${death_emulator}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_death_test.cmake)
