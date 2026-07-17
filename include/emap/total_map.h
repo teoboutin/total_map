@@ -212,7 +212,7 @@
 //
 //     #if TOTAL_MAP_VERSION >= 10200  // 1.2.0 or newer
 #define TOTAL_MAP_VERSION_MAJOR 0
-#define TOTAL_MAP_VERSION_MINOR 1
+#define TOTAL_MAP_VERSION_MINOR 2
 #define TOTAL_MAP_VERSION_PATCH 0
 #define TOTAL_MAP_VERSION                                                      \
     (TOTAL_MAP_VERSION_MAJOR * 10000 + TOTAL_MAP_VERSION_MINOR * 100 +         \
