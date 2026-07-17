@@ -157,7 +157,7 @@ constexpr emap::total_map cost{
 static_assert(cost[Color::Red] == 1250.0);
 ```
 
-### Deriving from a function
+### Deriving tables
 
 `total_map<E, V>::from(fn)` computes the table instead of authoring rows: `fn`
 is invoked once per enumerator, in enum order. There are no rows to get wrong —
@@ -176,6 +176,18 @@ The callable must return `V` itself (a cv/ref-qualified `V` is fine) —
 fixes each row's value type. Write `return 90.0;`, not `return 90;`, for a
 double map. Like every other construction path it is `consteval`: there is
 still no runtime population.
+
+`transform(fn)` is the sibling, deriving a table **from an existing table** by
+mapping each value — how per-enum config gets varied in practice (a theme from
+a base theme, a scaled cost table). The value type may change; the result is
+`total_map<E, U>` with `U` deduced from `fn`:
+
+```cpp
+constexpr auto dark = styles.transform([](Style s) { s.thickness += 1; return s; });
+constexpr auto names = styles.transform([](const Style& s) { return s.name; });
+
+static_assert(names[Color::Red][0] == 'r'); // total_map<Color, const char*>
+```
 
 ### Iterating
 
