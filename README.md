@@ -351,6 +351,41 @@ other non-structural value types — the by-value form requires the array to be 
 valid non-type template parameter, which `std::string_view`, `std::string`, and
 string-literal `const char*` values are not.
 
+### Proving uniqueness beyond keys
+
+Construction proves properties of the *keys*. `emap::all_unique` is the opt-in
+proof for the *value* side: that some projection of the values — a `stringId`,
+a wire code, the values themselves — is collision-free across the table.
+Useful whenever something outside the enum keys the data too (parsing,
+serialization):
+
+```cpp
+struct Style { int thickness; const char* stringId; };
+
+constexpr emap::total_map styles{
+    emap::entry{Color::Red,   Style{1, "red"}},
+    emap::entry{Color::Green, Style{2, "green"}},
+    emap::entry{Color::Blue,  Style{3, "blue"}},
+};
+
+static_assert(emap::all_unique(styles,
+    [](const Style& s) { return std::string_view{s.stringId}; }));
+```
+
+The projection is any callable, or a pointer to a data member
+(`&Style::thickness`); `all_unique(styles)` alone checks the values
+themselves. Once uniqueness is proven, a hand-rolled reverse lookup over
+`entries()` is *well-defined* — the answer is unique by proof, not by hope.
+
+**Project string-like members to `std::string_view`** (include it yourself —
+this header doesn't), so equality means content. A raw `const char*`
+projection compares addresses, and constant evaluation makes that loud rather
+than wrong, in compiler-divergent ways: clang refuses *any* comparison of
+string-literal addresses as unspecified, while g++ and MSVC accept
+distinct-content comparisons. Never a silent wrong "unique" — but only the
+`string_view` form is portable, and it is also the one that says what you
+mean.
+
 ### Self-tests
 
 The header ships with compile-time self-tests, off by default. They emit no
