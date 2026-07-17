@@ -214,6 +214,28 @@ for (auto [color, style] : styles.entries()
     use(color, style);
 ```
 
+A **common use case** of `entries()` is reverse lookup — parsing a string id
+back to its enum. It is deliberately not an API: hand-rolled, *you* choose the
+probe type, the projection, and the miss type (here `std::optional`, included
+by you):
+
+```cpp
+constexpr std::optional<Color> color_from_name(std::string_view name)
+{
+    for (auto [color, style] : styles.entries())
+        if (name == style.name)
+            return color;
+    return std::nullopt;
+}
+
+static_assert(color_from_name("green") == Color::Green);
+static_assert(!color_from_name("mauve"));
+```
+
+Comparing through `std::string_view` makes equality mean *content*, and
+[`emap::all_unique`](#proving-uniqueness-beyond-keys) can prove the answer is
+unique — so the first match is *the* match, by proof rather than by hope.
+
 Iterating the map directly gives **values only**, in enum order. `key_at(i)`
 recovers the key for a single slot in O(1), callable on an instance or on the
 type:
