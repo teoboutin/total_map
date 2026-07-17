@@ -53,7 +53,9 @@
 //   at compile time, where you want the compiler to guarantee exhaustiveness —
 //   e.g. per-enum config: colors, labels, thresholds, dispatch parameters.
 //   Author the table as one list of rows and let total_map prove you covered
-//   every case. There is no factory: CTAD deduces E and V from the rows.
+//   every case. Rows need no factory: CTAD deduces E and V from them. To
+//   COMPUTE the table from a function of the key instead of authoring rows,
+//   use total_map<E, V>::from(fn) — total by construction (see its block).
 //
 //       enum class Color { Red, Green, Blue, Count };
 //       struct Style { int thickness; const char* name; }; // NO key member
@@ -645,6 +647,18 @@ template <class E, class V> class total_map
     {
     }
 
+    // Build data_ by invoking fn once per enumerator, in enum order — the path
+    // behind from(). The tag keeps this overload out of every deduction the
+    // public constructors take part in. from()'s constraint has already fixed
+    // the result type to exactly V (cvref aside), so the braced init below can
+    // neither convert nor narrow.
+    struct from_fn_t {};
+    template <class F, std::size_t... Is>
+    consteval total_map(from_fn_t, F& fn, std::index_sequence<Is...>)
+        : data_{fn(static_cast<E>(Is))...}
+    {
+    }
+
   public:
     // Construct from an array holding exactly one entry per enumerator, in any
     // order. consteval => the check runs at compile time on every construction.
@@ -663,6 +677,33 @@ template <class E, class V> class total_map
     consteval total_map(Rows... rows)
         : total_map(std::array<entry<E, V>, sizeof...(Rows)>{rows...})
     {
+    }
+
+    // Derive the table from a FUNCTION of the key instead of authoring rows:
+    //
+    //     constexpr auto degrees = emap::total_map<Dir, int>::from(
+    //         [](Dir d) { return static_cast<int>(d) * 90; });
+    //
+    // fn is invoked once per enumerator, in enum order: slot i holds
+    // fn(key_at(i)). There is NOTHING to validate — fn is total over E by its
+    // type, so exhaustiveness, uniqueness and order hold by construction and
+    // make_perm is never consulted. The row checks exist because rows can lie;
+    // a function cannot.
+    //
+    // The callable must RETURN V — a cv/ref-qualified V is fine, but from()
+    // performs NO conversions, mirroring row authoring, where entry<E, V>
+    // fixes each row's value type at the same strictness. Deliberate: the one
+    // conversion worth wanting (int -> double) is formally NARROWING in the
+    // braced init that fills storage, which g++ 13 merely warns about and
+    // clang rejects — a portability line this header refuses to sit on. Write
+    // `return 90.0;`, not `return 90;`, for a double map. consteval, like
+    // every other construction path: there is still no runtime population.
+    template <class F>
+        requires std::invocable<F&, E> &&
+                 std::same_as<std::remove_cvref_t<std::invoke_result_t<F&, E>>, V>
+    static consteval total_map from(F fn)
+    {
+        return total_map(from_fn_t{}, fn, std::make_index_sequence<N>{});
     }
 
     // The key's TYPE is checked by the signature. Its VALUE is checked only in
@@ -1160,6 +1201,45 @@ constexpr emap::total_map kDirs{std::array{
 }};
 static_assert(kDirs[Dir::West] == 270);
 static_assert(kDirs.size() == 4);
+
+// --- from(fn): derive the table from a function of the key ---
+// fn is total over E by its TYPE, so exhaustiveness, uniqueness and order all
+// hold by construction — there are no rows for the checks to reject.
+constexpr auto kDegrees = emap::total_map<Dir, int>::from(
+    [](Dir d) { return static_cast<int>(d) * 90; });
+static_assert(kDegrees[Dir::North] == 0);
+static_assert(kDegrees[Dir::West] == 270);
+static_assert(kDegrees.size() == 4);
+
+// agrees with the row-authored map of the same values — the two construction
+// paths land in identical storage, and operator== can say so
+static_assert(kDegrees == kDirs);
+
+// V need only be copy-constructible, exactly as for row authoring
+constexpr auto kFnWeights = emap::total_map<Color, Weight>::from(
+    [](Color c) { return Weight{(static_cast<int>(c) + 1) * 10}; });
+static_assert(kFnWeights[Color::Blue].g == 30);
+
+// What from() accepts is a compile-time predicate, in the spirit of buildable.
+// A CONCEPT rather than a bare requires-expression, necessarily: at namespace
+// scope a requires-expression has no template parameters to fail substitution
+// on, and g++ 13 reports the failed overload as a HARD error instead of false.
+template <class M, class F>
+concept from_accepts = requires(F& f) { M::from(f); };
+
+// The callable must RETURN V (cvref aside), mirroring row authoring, where
+// entry<E, V> fixes each row's value type at the same strictness. In
+// particular an int result does NOT fill a double map — int -> double is
+// formally NARROWING in the braced init that fills storage, which g++ merely
+// warns about and clang rejects; from() refuses to sit on that line.
+constexpr auto kIntFn = [](Color) { return 1; };
+static_assert(from_accepts<emap::total_map<Color, int>, decltype(kIntFn)>);
+static_assert(!from_accepts<emap::total_map<Color, double>, decltype(kIntFn)>);
+
+// a callable of the wrong ARGUMENT type is the same clean constraint failure,
+// not an instantiation error deep in the builder
+constexpr auto kTakesInt = [](int i) { return i; };
+static_assert(!from_accepts<emap::total_map<Color, int>, decltype(kTakesInt)>);
 
 // --- rejection behavior, expressed as static_assert via emap::buildable ---
 // (entry<Color,int> is structural, so its arrays are valid template params.)
