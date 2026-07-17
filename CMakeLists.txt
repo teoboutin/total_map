@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.23)
 
 project(total_map
-    VERSION      0.1.0
+    VERSION      0.2.0
     DESCRIPTION  "Compile-time-checked total map from an enum to values"
     HOMEPAGE_URL "https://github.com/teoboutin/total_map"
     LANGUAGES    CXX)

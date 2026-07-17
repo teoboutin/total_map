@@ -1,7 +1,7 @@
 # total_map
 
 [![CI](https://github.com/teoboutin/total_map/actions/workflows/ci.yml/badge.svg)](https://github.com/teoboutin/total_map/actions/workflows/ci.yml)
-[![Try it on Compiler Explorer](https://img.shields.io/badge/try_it-Compiler_Explorer-67c52a)](https://godbolt.org/z/K1K4vPbdP)
+[![Try it on Compiler Explorer](https://img.shields.io/badge/try_it-Compiler_Explorer-67c52a)](https://godbolt.org/z/9K375b7d1)
 
 A single-header, C++20, compile-time-checked **total map from an enum to values**.
 
@@ -91,7 +91,7 @@ Or just drop `include/emap/total_map.h` into your project, no requirements above
 include(FetchContent)
 FetchContent_Declare(total_map
     GIT_REPOSITORY https://github.com/teoboutin/total_map.git
-    GIT_TAG        v0.1.0)
+    GIT_TAG        v0.2.0)
 FetchContent_MakeAvailable(total_map)
 
 target_link_libraries(app PRIVATE emap::total_map)
@@ -100,7 +100,7 @@ target_link_libraries(app PRIVATE emap::total_map)
 **Installed, via find_package:**
 
 ```cmake
-find_package(total_map 0.1.0 REQUIRED)
+find_package(total_map 0.2.0 REQUIRED)
 target_link_libraries(app PRIVATE emap::total_map)
 ```
 
