@@ -753,6 +753,32 @@ template <class E, class V> class total_map
         return total_map(from_fn_t{}, fn, std::make_index_sequence<N>{});
     }
 
+    // Derive a table FROM THIS TABLE by mapping each value; keys are
+    // untouched. The sibling of from(): that computes from the key, this from
+    // an existing map — which is how per-enum config gets varied in practice
+    // (a theme derived from a base theme, a scaled cost table). Total by
+    // construction for the same reason, so again nothing is validated.
+    //
+    //     constexpr auto dark = styles.transform([](Style s) {
+    //         s.thickness += 1;
+    //         return s;
+    //     });
+    //
+    // The value TYPE may change: the result is total_map<E, U> with U deduced
+    // from fn — cvref is stripped, so a V transformed in place and returned by
+    // reference still lands as a value. fn sees only the VALUE; a key-aware
+    // overload is deliberately absent, because a generic callable can satisfy
+    // both signatures and would make the pair ambiguous. Delegates to
+    // total_map<E, U>::from, so table construction stays in exactly two
+    // consteval places: the row builder and from().
+    template <class F>
+        requires std::invocable<F&, const V&>
+    consteval auto transform(F fn) const
+    {
+        using U = std::remove_cvref_t<std::invoke_result_t<F&, const V&>>;
+        return total_map<E, U>::from([&](E key) -> U { return fn((*this)[key]); });
+    }
+
     // The key's TYPE is checked by the signature. Its VALUE is checked only in
     // debug (see CAVEATS): a `Count` sentinel used as a live "none" value, or
     // any forged cast, would otherwise read out of bounds. Free under NDEBUG,
@@ -1332,6 +1358,33 @@ static_assert(!from_accepts<emap::total_map<Color, double>, decltype(kIntFn)>);
 // not an instantiation error deep in the builder
 constexpr auto kTakesInt = [](int i) { return i; };
 static_assert(!from_accepts<emap::total_map<Color, int>, decltype(kTakesInt)>);
+
+// --- transform(fn): derive a table from a table ---
+// fn maps each VALUE; keys are untouched. Total by construction, like from():
+// there is nothing to validate.
+constexpr auto kThick = kBasic.transform([](Style s) {
+    s.thickness *= 10;
+    return s;
+});
+static_assert(kThick[Color::Green].thickness == 20);
+static_assert(kThick[Color::Green].name[0] == 'g'); // untouched member survives
+static_assert(kThick.size() == kBasic.size());
+static_assert(std::is_same_v<decltype(kThick), const emap::total_map<Color, Style>>);
+
+// the value TYPE may change — U is deduced from fn's result
+constexpr auto kNames = kBasic.transform([](const Style& s) { return s.name; });
+static_assert(std::is_same_v<decltype(kNames), const emap::total_map<Color, const char*>>);
+static_assert(kNames[Color::Red][0] == 'r');
+
+// a non-default-constructible U works: only copies are made
+constexpr auto kCostWeights = kCost.transform([](double d) { return Weight{static_cast<int>(d)}; });
+static_assert(kCostWeights[Color::Red].g == 1250);
+
+// acceptance is a predicate, like from_accepts
+template <class M, class F>
+concept transform_accepts = requires(const M& m, F& f) { m.transform(f); };
+static_assert(transform_accepts<emap::total_map<Color, int>, decltype(kTakesInt)>);
+static_assert(!transform_accepts<emap::total_map<Color, Style>, decltype(kTakesInt)>);
 
 // --- rejection behavior, expressed as static_assert via emap::buildable ---
 // (entry<Color,int> is structural, so its arrays are valid template params.)
