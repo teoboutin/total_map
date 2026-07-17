@@ -77,7 +77,7 @@
 //       static_assert(cost[Color::Red] == 1250.0);
 //
 //   To iterate keys alongside values, use entries(). Values come back by
-//   reference, so they can be mutated through the view:
+//   const reference:
 //
 //       for (auto [color, style] : styles.entries())
 //           use(color, style);
@@ -89,9 +89,13 @@
 //   composes with std::views; this header does not include <ranges> itself.
 //
 //   It is NOT a runtime container: there is no insert/erase and no runtime
-//   construction path. Once built, VALUES may be mutated freely (there is no
-//   stored key to desynchronize); the set of keys is fixed. If you need to
-//   populate a map at runtime, this is the wrong tool.
+//   construction path. It is also IMMUTABLE: values cannot be changed and
+//   instances cannot be reassigned after construction, so anything proven
+//   about a table (construction's key proofs, an emap::all_unique value
+//   proof) holds for every instance's whole lifetime. For a table whose
+//   values are tuned at RUN TIME, thaw a proven table into
+//   emap::mutable_total_map (its own header, emap/mutable_total_map.h). If
+//   you need to populate a map at runtime, neither type is the right tool.
 //
 // REQUIREMENTS (what it relies on to work)
 //   * C++20: consteval, concepts/requires-clauses, class template argument
@@ -784,31 +788,37 @@ template <class E, class V> class total_map
     // any forged cast, would otherwise read out of bounds. Free under NDEBUG,
     // and constant-expression subscripts are checked regardless.
     //
-    // Mutation is safe: only the value is exposed; there is no stored key to
-    // corrupt.
+    // const-only, deliberately — there is no mutable overload. Values are
+    // immutable after construction, which is what lets an emap::all_unique
+    // proof hold for an instance's whole lifetime, copies included. For a
+    // table whose values are tuned at run time, thaw a proven table into
+    // emap::mutable_total_map (its own header, emap/mutable_total_map.h).
     constexpr const V& operator[](E e) const
     {
         assert(static_cast<std::size_t>(e) < N &&
                "emap::total_map: key out of range (a sentinel used as a live value?)");
         return data_[static_cast<std::size_t>(e)];
     }
-    constexpr V& operator[](E e)
-    {
-        assert(static_cast<std::size_t>(e) < N &&
-               "emap::total_map: key out of range (a sentinel used as a live value?)");
-        return data_[static_cast<std::size_t>(e)];
-    }
 
-    // Iteration is over VALUES, in enum order. Both const and mutable, since
-    // mutating a value can no longer break any invariant.
-    constexpr auto begin() { return data_.begin(); }
-    constexpr auto end() { return data_.end(); }
+    // Immutable also means NOT REASSIGNABLE: swapping in a different
+    // (validated) table would detach the instance from any proof stated about
+    // the table it was built as. Deleted rather than merely absent, so the
+    // diagnostic names the intent. Copy/move CONSTRUCTION stay — deriving a
+    // new table is fine; changing an existing one is not. The constructors
+    // are declared (as defaulted) because a user-declared assignment operator
+    // makes the implicitly-generated copy constructor deprecated, which
+    // -Wdeprecated-copy under -Werror would promote to an error.
+    constexpr total_map(const total_map&) = default;
+    constexpr total_map(total_map&&) = default;
+    total_map& operator=(const total_map&) = delete;
+    total_map& operator=(total_map&&) = delete;
+
+    // Iteration is over VALUES, in enum order. const-only, like operator[].
     constexpr auto begin() const { return data_.begin(); }
     constexpr auto end() const { return data_.end(); }
     constexpr auto cbegin() const { return data_.cbegin(); }
     constexpr auto cend() const { return data_.cend(); }
 
-    constexpr V* data() { return data_.data(); }
     constexpr const V* data() const { return data_.data(); }
 
     static constexpr std::size_t size() { return N; }
@@ -833,9 +843,8 @@ template <class E, class V> class total_map
     static constexpr auto keys() { return detail::key_view<E>{N}; }
 
     // Iterate keys alongside values: `for (auto [k, v] : m.entries())`.
-    // Values are references, so mutation through the view works. The view is
-    // non-owning — calling entries() on a temporary dangles, as with any view.
-    constexpr auto entries() { return detail::entry_view<E, V>{data_.data(), N}; }
+    // Values come back by const reference. The view is non-owning — calling
+    // entries() on a temporary dangles, as with any view.
     constexpr auto entries() const { return detail::entry_view<E, const V>{data_.data(), N}; }
 
     // Equality is over VALUES, slot for slot. Authoring order cannot be
@@ -1009,6 +1018,13 @@ concept buildable =
 // and projection are constants. A runtime uniqueness check would be a
 // different feature with different obligations. O(N^2) pairwise, which is
 // nothing at enumerator counts.
+//
+// The proof is DURABLE: total_map values are immutable and instances are not
+// assignable, so a table proven unique STAYS proven — for every copy, for
+// its whole lifetime. This is also why all_unique does not accept
+// emap::mutable_total_map: a table that can drift is exactly the object a
+// stated proof no longer covers. Prove the frozen baseline; thaw a copy if
+// you need a live table.
 // ---------------------------------------------------------------------------
 namespace detail
 {
@@ -1216,19 +1232,37 @@ static_assert(kEqA != kEqC); // != is derived from ==, lock it too
 static_assert(std::equality_comparable<emap::total_map<Color, double>>);
 static_assert(!std::equality_comparable<emap::total_map<Color, Weight>>);
 
-// mutation through the non-const accessor in a constexpr context — safe now,
-// because there is no stored key to desynchronize.
-constexpr int mutated()
-{
-    emap::total_map m{std::array{
-        entry{Color::Red, Style{1, "red"}},
-        entry{Color::Green, Style{2, "green"}},
-        entry{Color::Blue, Style{3, "blue"}},
-    }};
-    m[Color::Blue].thickness = 99;
-    return m[Color::Blue].thickness;
-}
-static_assert(mutated() == 99);
+// --- immutability: locked as type-level facts ---
+// Values are immutable after construction and instances are not reassignable
+// — the guarantee that makes an all_unique proof durable for an instance's
+// whole lifetime. Locked with type traits rather than must-not-compile
+// files, deliberately: is_assignable and friends ARE the "would this
+// expression compile" predicates, and they are portable where rejection
+// diagnostic text is not. (Mutation now lives in emap::mutable_total_map,
+// whose own selftests cover it.)
+using BasicMap = emap::total_map<Color, Style>;
+
+// no assignment, in either flavor
+static_assert(!std::is_copy_assignable_v<BasicMap>);
+static_assert(!std::is_move_assignable_v<BasicMap>);
+
+// construction still works: deriving a new table is fine, changing one is not
+static_assert(std::is_copy_constructible_v<BasicMap>);
+static_assert(std::is_move_constructible_v<BasicMap>);
+
+// operator[] on a NON-CONST map still reads through const — there is no
+// mutable overload to bind to, and what it returns cannot be assigned to
+static_assert(std::is_same_v<decltype(std::declval<BasicMap&>()[Color::Red]), const Style&>);
+static_assert(!std::is_assignable_v<decltype(std::declval<BasicMap&>()[Color::Red]), Style>);
+
+// iteration and data() on a non-const map yield const access
+static_assert(std::is_same_v<decltype(std::declval<BasicMap&>().begin()),
+                             decltype(std::declval<const BasicMap&>().begin())>);
+static_assert(std::is_same_v<decltype(std::declval<BasicMap&>().data()), const Style*>);
+
+// entries() on a non-const map is the const view: no mutation path through it
+static_assert(std::is_same_v<decltype(std::declval<BasicMap&>().entries()),
+                             emap::detail::entry_view<Color, const Style>>);
 
 // Values iterate in enum order (by key), regardless of authoring order. key_at
 // recovers each key from its position, so mutating a value cannot ever make an
@@ -1276,21 +1310,6 @@ constexpr bool entriesAreInEnumOrder()
     return i == kBasic.size();
 }
 static_assert(entriesAreInEnumOrder());
-
-// mutation through entries(), in a constant expression
-constexpr int mutateViaEntries()
-{
-    emap::total_map m{
-        entry{Color::Red, Style{1, "red"}},
-        entry{Color::Green, Style{2, "green"}},
-        entry{Color::Blue, Style{3, "blue"}},
-    };
-    for (auto [key, value] : m.entries()) {
-        value.thickness *= 10;
-    }
-    return m[Color::Blue].thickness;
-}
-static_assert(mutateViaEntries() == 30);
 
 // The iterator models forward_iterator in both const and mutable forms, and the
 // view is a forward_range. Asserted so a later edit cannot silently downgrade
