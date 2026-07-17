@@ -12,8 +12,27 @@ installed package declares (`COMPATIBILITY SameMinorVersion`), so
 
 ### Changed
 
+- **Breaking:** `total_map` is now fully immutable after construction. The
+  non-const `operator[]`, `begin()`/`end()`, `data()` and `entries()`
+  overloads are gone, and assignment is deleted (copy/move construction
+  stay). An `emap::all_unique` proof therefore holds for every instance's
+  whole lifetime. Migration: in-place value mutation moves to the new
+  `emap::mutable_total_map` (thaw the table: `emap::mutable_total_map live =
+  frozen;`); wholesale reassignment becomes construction of a new table.
 - CI gains a `ci-ok` aggregate job — the single status check the branch
   ruleset requires, so a red job anywhere in the matrix blocks the merge.
+
+### Added
+
+- `emap::mutable_total_map<E, V>` — the runtime-tunable sibling, in its own
+  header `emap/mutable_total_map.h` (bare-copy installs now copy both files;
+  the new header reaches its sibling via a quote-form include). It never
+  validates anything itself: the primary constructor thaws a proven
+  `total_map` (constexpr, so at run time too), and row/array/`from(fn)`
+  authoring delegate to `total_map`, keeping validation and diagnostics in
+  one place. Full mutable surface, plus heterogeneous `==`/`!=` against a
+  `total_map` baseline for drift checks. Deliberately absent: `transform`,
+  any conversion back to `total_map`, and `all_unique` eligibility.
 
 ## [0.2.0] — 2026-07-17
 
