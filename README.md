@@ -210,6 +210,17 @@ type:
 static_assert(styles.key_at(0) == Color::Red);
 ```
 
+`keys()` iterates the keys themselves, in enum order — the third of the three
+iterations. It is `static`, like `key_at`: the keys are a property of the type,
+so no instance is needed (though calling it on one works too), and the view
+cannot dangle. The iterator models `std::forward_iterator` and composes with
+`std::views`, like `entries()`:
+
+```cpp
+for (Color c : emap::total_map<Color, Style>::keys())
+    use(c);
+```
+
 `begin()/end()`, `cbegin()/cend()`, `data()`, and `size()` are all available;
 `operator[]`, `entries()`, and the iterators come in const and mutable forms.
 
