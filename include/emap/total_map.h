@@ -553,6 +553,53 @@ template <class E, class V> class entry_view
     constexpr auto end() const { return entry_iterator<E, V>{base_, n_}; }
     constexpr std::size_t size() const { return n_; }
 };
+
+// Forward iterator over the KEYS of a contiguous enum: slot i IS the key
+// static_cast<E>(i), so nothing is stored but the index — the same recovery
+// key_at() performs, one slot at a time.
+template <class E> class key_iterator
+{
+    std::size_t i_ = 0;
+
+  public:
+    using value_type = E;
+    using reference = E;
+    using difference_type = std::ptrdiff_t;
+    using iterator_concept = std::forward_iterator_tag;
+    // Legacy category stays input_iterator_tag, as for entry_iterator: a
+    // Cpp17ForwardIterator must return a true reference, and ours is a value.
+    using iterator_category = std::input_iterator_tag;
+
+    key_iterator() = default;
+    constexpr explicit key_iterator(std::size_t i) : i_(i) {}
+
+    constexpr E operator*() const { return static_cast<E>(i_); }
+    constexpr key_iterator& operator++()
+    {
+        ++i_;
+        return *this;
+    }
+    constexpr key_iterator operator++(int)
+    {
+        auto tmp = *this;
+        ++i_;
+        return tmp;
+    }
+    constexpr bool operator==(const key_iterator&) const = default;
+};
+
+// The range keys() returns. Nothing to point into — keys are computed from
+// their own positions — so unlike entry_view it cannot dangle.
+template <class E> class key_view
+{
+    std::size_t n_ = 0;
+
+  public:
+    constexpr explicit key_view(std::size_t n) : n_(n) {}
+    constexpr auto begin() const { return key_iterator<E>{0}; }
+    constexpr auto end() const { return key_iterator<E>{n_}; }
+    constexpr std::size_t size() const { return n_; }
+};
 } // namespace detail
 
 // ---------------------------------------------------------------------------
@@ -751,6 +798,13 @@ template <class E, class V> class total_map
         assert(i < N && "emap::total_map: index out of range");
         return static_cast<E>(i);
     }
+
+    // Iterate the KEYS, in enum order — the third of the three iterations:
+    // the map itself yields values, entries() yields both, keys() yields keys.
+    // Static, like key_at, because the keys are a property of the TYPE — no
+    // instance is consulted, and the view cannot dangle:
+    //     for (Color c : emap::total_map<Color, Style>::keys()) ...
+    static constexpr auto keys() { return detail::key_view<E>{N}; }
 
     // Iterate keys alongside values: `for (auto [k, v] : m.entries())`.
     // Values are references, so mutation through the view works. The view is
@@ -1179,6 +1233,44 @@ constexpr bool entriesComposeWithViews()
     return total == 5; // green(2) + blue(3)
 }
 static_assert(entriesComposeWithViews());
+
+// --- keys(): iterate the keys themselves, in enum order ---
+// The third of the three iterations: the map yields values, entries() yields
+// both, keys() yields keys. Static — the keys are a property of the TYPE.
+constexpr bool keysAreInEnumOrder()
+{
+    std::size_t i = 0;
+    for (Color c : emap::total_map<Color, Style>::keys()) {
+        if (c != static_cast<Color>(i)) {
+            return false;
+        }
+        ++i;
+    }
+    return i == emap::total_map<Color, Style>::size();
+}
+static_assert(keysAreInEnumOrder());
+
+// callable on an instance as well as on the type, like key_at
+static_assert(kBasic.keys().size() == 3);
+
+// models forward_iterator/forward_range, locked like the entries() iterator
+static_assert(std::forward_iterator<decltype(kBasic.keys().begin())>);
+static_assert(std::ranges::forward_range<decltype(kBasic.keys())>);
+
+// and composes with std::views the same way
+constexpr bool keysComposeWithViews()
+{
+    std::size_t n = 0;
+    for (Color c : emap::total_map<Color, Style>::keys()
+                 | std::views::filter([](Color c) { return c != Color::Green; })) {
+        if (c == Color::Green) {
+            return false;
+        }
+        ++n;
+    }
+    return n == 2;
+}
+static_assert(keysComposeWithViews());
 
 // enum_count customization: an enum with no Count sentinel
 enum class Dir { North, East, South, West };
