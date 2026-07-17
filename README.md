@@ -3,7 +3,9 @@
 [![CI](https://github.com/teoboutin/total_map/actions/workflows/ci.yml/badge.svg)](https://github.com/teoboutin/total_map/actions/workflows/ci.yml)
 [![Try it on Compiler Explorer](https://img.shields.io/badge/try_it-Compiler_Explorer-67c52a)](https://godbolt.org/z/9K375b7d1)
 
-A single-header, C++20, compile-time-checked **total map from an enum to values**.
+A single-header, C++20, compile-time-checked **total map from an enum to
+values**. An optional second header adds `emap::mutable_total_map`, the
+[runtime-tunable sibling](#a-runtime-tunable-sibling-mutable_total_map).
 
 `emap::total_map<E, V>` stores exactly one `V` per enumerator of `E` in a flat
 `std::array<V, N>` indexed by the enum's underlying value. Lookup is a plain
@@ -15,8 +17,10 @@ covered exactly once**.
 defined on every enumerator. Proved at compile time.
 
 It is a compile-time lookup table, not a runtime container: there is no
-`insert`/`erase` and no runtime construction path. Once built, values may be
-mutated; the set of keys is fixed.
+`insert`/`erase` and no runtime construction path. It is also **immutable**:
+values cannot change and instances cannot be reassigned, so anything proven
+about a table stays proven for every instance's whole lifetime. For values
+tuned at run time, thaw a proven table into `emap::mutable_total_map`.
 
 ```cpp
 enum class Color { Red, Green, Blue, Count };
@@ -46,8 +50,8 @@ failures to compile time and keeps lookup as fast as a raw array.
   in enum order regardless. Benefit: you can reorder the enumerators without
   having to edit the map definition itself.
 - **No stored keys** — the key validates and places each row, then is dropped.
-  Storage is a bare `std::array<V, N>`, so a value can never disagree with its
-  slot and mutation is always safe.
+  Storage is a bare `std::array<V, N>`, so a value can never disagree with
+  its slot.
 
 ## Requirements
 
@@ -191,8 +195,8 @@ static_assert(names[Color::Red][0] == 'r'); // total_map<Color, const char*>
 
 ### Iterating
 
-`entries()` iterates keys alongside values, in enum order. Values come back by
-reference, so they can be mutated through the view:
+`entries()` iterates keys alongside values, in enum order. Values come back
+by const reference:
 
 ```cpp
 for (auto [color, style] : styles.entries())
@@ -399,6 +403,12 @@ The projection is any callable, or a pointer to a data member
 themselves. Once uniqueness is proven, a hand-rolled reverse lookup over
 `entries()` is *well-defined* — the answer is unique by proof, not by hope.
 
+The proof is **durable**: `total_map` is immutable, so a table proven unique
+stays proven — for every copy, for its whole lifetime. This is also why
+`all_unique` does not accept `mutable_total_map`: a table that can drift is
+exactly the object a stated proof no longer covers. Prove the frozen
+baseline; thaw a copy if you need a live table.
+
 **Project string-like members to `std::string_view`** (include it yourself —
 this header doesn't), so equality means content. A raw `const char*`
 projection compares addresses, and constant evaluation makes that loud rather
@@ -407,6 +417,32 @@ string-literal addresses as unspecified, while g++ and MSVC accept
 distinct-content comparisons. Never a silent wrong "unique" — but only the
 `string_view` form is portable, and it is also the one that says what you
 mean.
+
+### A runtime-tunable sibling: mutable_total_map
+
+`emap::mutable_total_map<E, V>` (header `emap/mutable_total_map.h`, which
+includes `total_map.h` — copy both files for the no-build-system install) is
+the mutable sibling: same fixed key set, same storage shape, but values may
+be mutated and instances assigned. **Every `mutable_total_map` begins life as
+a proven table** — the header contains no validation of its own. Author the
+baseline as a `total_map`, keeping every compile-time proof, then *thaw* it,
+at run time if you like:
+
+```cpp
+#include <emap/mutable_total_map.h>
+
+emap::mutable_total_map live = styles;   // thaw a proven table
+live[Color::Red].thickness = 4;          // tune values at run time
+if (live != styles) { /* drift against the baseline is observable */ }
+```
+
+Row and `from(fn)` authoring also work and are sugar that builds the
+`total_map` first — a bad table is rejected with `total_map`'s own
+diagnostics. Mutation cannot break the *key* guarantees (keys are positional
+and never stored), which is why the mutable surface is safe to offer. What a
+live table gives up is value proofs: `all_unique` refuses the type, and
+`transform` stays on `total_map` (derive there, then thaw). There is no
+conversion back from a live table to a `total_map`.
 
 ### Self-tests
 
