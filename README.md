@@ -193,6 +193,11 @@ static_assert(styles.key_at(0) == Color::Red);
 `begin()/end()`, `cbegin()/cend()`, `data()`, and `size()` are all available;
 `operator[]`, `entries()`, and the iterators come in const and mutable forms.
 
+Maps compare with `==`/`!=` whenever `V` does — equality is over values, slot
+for slot, so authoring order is unobservable: the same rows in any order build
+equal maps. A `V` with no `operator==` leaves the map non-comparable rather
+than ill-formed.
+
 ### Sentinels spelled otherwise, and enums without one
 
 By default the count comes from a trailing `Count` enumerator. Three ways to

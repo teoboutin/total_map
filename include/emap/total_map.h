@@ -716,6 +716,27 @@ template <class E, class V> class total_map
     // non-owning — calling entries() on a temporary dangles, as with any view.
     constexpr auto entries() { return detail::entry_view<E, V>{data_.data(), N}; }
     constexpr auto entries() const { return detail::entry_view<E, const V>{data_.data(), N}; }
+
+    // Equality is over VALUES, slot for slot. Authoring order cannot be
+    // observed — rows were placed by key and the keys dropped — so two maps
+    // built from the same rows in any order compare equal. != is derived from
+    // == by the language.
+    //
+    // The requires-clause makes the operator CONDITIONALLY present: a V with
+    // no operator== leaves the MAP non-comparable — a clean concept `false` —
+    // rather than poisoning it. That is also why this is NOT `= default`,
+    // which reads more naturally: a defaulted == is only DELETED, not absent,
+    // when V has no ==, and deciding even that much goes through
+    // std::array's operator==, which libstdc++ declares UNCONSTRAINED — so
+    // the defaulted operator looks viable and then hard-errors in its body,
+    // outside any immediate context, the moment anything (such as the
+    // std::equality_comparable concept) asks. Measured on g++ 13.3; the
+    // self-tests lock the conditional behavior on every toolchain.
+    friend constexpr bool operator==(const total_map& a, const total_map& b)
+        requires std::equality_comparable<V>
+    {
+        return a.data_ == b.data_;
+    }
 };
 
 // Deduction guide: deduces E and V from the entry rows, keeping call sites
@@ -985,6 +1006,21 @@ constexpr emap::total_map kWeights{std::array{
     entry{Color::Red, Weight{10}},
 }};
 static_assert(kWeights[Color::Green].g == 20);
+
+// --- operator==: equality over values, slot for slot ---
+// Authoring order CANNOT be observed: rows were placed by key and the keys
+// dropped, so two maps built from the same rows in any order are equal.
+constexpr emap::total_map kEqA{entry{Color::Red, 1}, entry{Color::Green, 2}, entry{Color::Blue, 3}};
+constexpr emap::total_map kEqB{entry{Color::Blue, 3}, entry{Color::Green, 2}, entry{Color::Red, 1}};
+constexpr emap::total_map kEqC{entry{Color::Red, 1}, entry{Color::Green, 2}, entry{Color::Blue, 4}};
+static_assert(kEqA == kEqB);
+static_assert(kEqA != kEqC); // != is derived from ==, lock it too
+
+// Conditionally present, not conditionally correct: a V with no operator==
+// (Weight above has none) leaves the MAP non-comparable — a clean concept
+// `false`, not a hard error in the map's own definition.
+static_assert(std::equality_comparable<emap::total_map<Color, double>>);
+static_assert(!std::equality_comparable<emap::total_map<Color, Weight>>);
 
 // mutation through the non-const accessor in a constexpr context — safe now,
 // because there is no stored key to desynchronize.
