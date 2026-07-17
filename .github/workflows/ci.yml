@@ -20,6 +20,10 @@ concurrency:
 # entries()-composes-with-views guarantee depends on.
 #
 # Do not re-add them without re-establishing that those failures are gone.
+#
+# ADDING A JOB? Add it to ci-ok's `needs` list at the bottom of this file, or
+# it is invisible to the branch ruleset: ci-ok is the ONE required check, and
+# it only vouches for the jobs it needs.
 
 jobs:
   linux-gcc:
@@ -228,3 +232,38 @@ jobs:
           WORK="$(dirname "$SRC")/consumer-work"
           cmake -DSOURCE_DIR="$SRC" -DWORK_DIR="$WORK" -DCONFIG=Release \
                 -P cmake/run_consumer_tests.cmake
+
+  ci-ok:
+    # The ONE check the master ruleset requires. Requiring job names directly
+    # goes stale the moment a matrix cell is renamed (a bumped runner image, a
+    # new compiler version) and stale required checks block every PR forever;
+    # requiring this aggregate instead self-maintains, PROVIDED every job
+    # appears in `needs` below — see the warning at the top of this file.
+    #
+    # `if: always()` is load-bearing: without it a failed need SKIPS this job,
+    # and a skipped check is not a failed one — the ruleset would wait forever
+    # rather than go red. The step then refuses anything short of success,
+    # so cancelled/skipped needs fail loudly instead of passing silently.
+    name: ci-ok
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - linux-gcc
+      - linux-clang
+      - linux-clang22
+      - emscripten
+      - linux-arm
+      - macos
+      - windows
+      - consumers
+    steps:
+      - name: Fail unless every needed job succeeded
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "needed job results: $results"
+          for r in $results; do
+            if [ "$r" != "success" ]; then
+              echo "::error::a needed job finished with result '$r'"
+              exit 1
+            fi
+          done
