@@ -16,7 +16,9 @@ function(total_map_add_negative_tests)
         "duplicate_key|duplicate enum key"
         "missing_enumerator|enum value not covered"
         "too_many_rows|duplicate enum key"
-        "key_out_of_range|enum key >= enum_count_v<E>")
+        "key_out_of_range|enum key >= enum_count_v<E>"
+        "mutable_duplicate_key|duplicate enum key"
+        "mutable_missing_enumerator|enum value not covered")
 
     foreach(case IN LISTS cases)
         string(REPLACE "|" ";" parts "${case}")
