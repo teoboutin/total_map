@@ -69,7 +69,8 @@ target_sources(total_map
     INTERFACE
     FILE_SET  HEADERS
     BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
-    FILES     ${CMAKE_CURRENT_SOURCE_DIR}/include/emap/total_map.h)
+    FILES     ${CMAKE_CURRENT_SOURCE_DIR}/include/emap/total_map.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/include/emap/mutable_total_map.h)
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -81,6 +82,10 @@ if(TOTAL_MAP_BUILD_TESTS)
     add_executable(total_map_selftest tests/selftest.cpp)
     target_link_libraries(total_map_selftest PRIVATE emap::total_map)
     add_test(NAME total_map_selftest COMMAND total_map_selftest)
+
+    add_executable(total_map_selftest_mutable tests/selftest_mutable.cpp)
+    target_link_libraries(total_map_selftest_mutable PRIVATE emap::total_map)
+    add_test(NAME total_map_selftest_mutable COMMAND total_map_selftest_mutable)
 
     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/NegativeTests.cmake)
     total_map_add_negative_tests()
