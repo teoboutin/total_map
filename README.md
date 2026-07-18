@@ -418,6 +418,117 @@ distinct-content comparisons. Never a silent wrong "unique" — but only the
 `string_view` form is portable, and it is also the one that says what you
 mean.
 
+### Lookup by id: keyed_map
+
+`emap::all_unique` states a proof; `emap::keyed_map<E, V, Proj>` (header
+`emap/keyed_map.h`) carries it in the type — a `total_map` that has proven,
+at construction, that `Proj` maps no two of its values to equal results. The
+projected result is the value's **id** (a wire code, a name), and the proof
+licenses the one lookup `total_map` cannot have: `find(id)`, well-defined
+because at most one value can match.
+
+```cpp
+#include <emap/keyed_map.h>
+
+enum class Color { Red, Green, Blue, Count };
+struct Style { int wireCode; int thickness; };
+
+constexpr emap::keyed_map<Color, Style, &Style::wireCode> styles{
+    emap::entry{Color::Red,   Style{7,  1}},
+    emap::entry{Color::Green, Style{9,  2}},
+    emap::entry{Color::Blue,  Style{12, 3}},  // a duplicate wireCode -> compile error
+};
+
+static_assert(styles.find(9)->thickness == 2);  // hit
+static_assert(styles.find(8) == nullptr);       // miss: find is the library's
+                                                // one partial lookup, and says so
+```
+
+`find` returns a const pointer, `nullptr` on a miss — nothing proves an
+arbitrary id is present, only that a present one is unambiguous. `Proj` is
+part of the type (a data-member pointer or a captureless lambda; omitted, the
+values are their own ids). Construction **promotes** a proven `total_map`
+(implicitly, at compile time), so an API taking `keyed_map` can be handed a
+`total_map` and the missing proof is demanded at the call site. A collision
+names both offending slots in the diagnostic. Acceptance is again a
+predicate: `emap::keyable<Arr, Proj>` / `emap::keyable<&Arr, Proj>`,
+subsuming `buildable`. For string ids, project to `std::string_view` so
+equality means content.
+
+### A proven two-enum correspondence: bijection
+
+`emap::bijection<E1, E2>` (header `emap/bijection.h`) is a `total_map<E1,
+E2>` that has additionally proven no E2 value repeats — and demands
+`enum_count_v<E1> == enum_count_v<E2>` by `static_assert`. Total + injective
+at equal counts is bijective, which licenses inversion with no further
+proof:
+
+```cpp
+#include <emap/bijection.h>
+
+enum class Port { A, B, C, Count };
+enum class Pin  { P0, P1, P2, Count };
+
+constexpr emap::bijection wires{
+    emap::entry{Port::A, Pin::P2},
+    emap::entry{Port::B, Pin::P0},
+    emap::entry{Port::C, Pin::P1},  // repeat a Pin -> compile error
+};
+
+static_assert(wires[Port::A] == Pin::P2);            // inherited total lookup
+static_assert(wires.inverse()[Pin::P2] == Port::A);  // the licensed operation
+```
+
+`inverse()` materializes the reversed map at compile time — it re-checks
+nothing, because the inverse of a proven bijection is proven by the same
+evidence. `inverse_at(E2)` is the runtime single-slot form, returning `E1`
+**by value**: bijectivity makes the inverse total, so there is no pointer to
+be honest with. `bijection<E, E>` is a proven permutation. Acceptance:
+`emap::bijective<Arr | &Arr>`, subsuming `buildable` (note: between enums of
+*unequal counts* the predicate is a hard error, not `false` — the count
+check is a property of the types).
+
+### Joining proofs: snapshot_map
+
+`emap::join` (header `emap/snapshot_map.h`) composes three proven tables
+into the library's first non-enum-indexed one — with **no validation of its
+own**, because its signature is its proof:
+
+```cpp
+#include <emap/snapshot_map.h>
+
+enum class Jack { J0, J1, J2, Count };   // wire-facing enum
+enum class Amp  { Lo, Mid, Hi, Count };  // internal enum
+struct Patch { int wire; };
+struct Conf  { int gain; };
+
+constexpr emap::keyed_map<Jack, Patch, &Patch::wire> patches{
+    emap::entry{Jack::J0, Patch{100}},
+    emap::entry{Jack::J1, Patch{200}},
+    emap::entry{Jack::J2, Patch{300}}};
+constexpr emap::bijection link{                       // Jack <-> Amp
+    emap::entry{Jack::J0, Amp::Mid},
+    emap::entry{Jack::J1, Amp::Lo},
+    emap::entry{Jack::J2, Amp::Hi}};
+constexpr emap::total_map confs{                      // Amp -> Conf
+    emap::entry{Amp::Lo, Conf{1}},
+    emap::entry{Amp::Mid, Conf{5}},
+    emap::entry{Amp::Hi, Conf{9}}};
+
+constexpr auto byWire = emap::join(patches, link, confs);
+static_assert(byWire.find(100)->gain == 5);  // wire id -> config
+static_assert(byWire.find(42) == nullptr);
+```
+
+Key distinctness comes from the `keyed_map`, coverage from totality, and
+the `bijection` guarantees the snapshot is exactly the third table
+**re-keyed** by the first one's ids — every row represented exactly once.
+The result, `emap::snapshot_map<K, V, N>`, is sealed: `find` and `size()`
+are the whole surface, and `join` is the only producer, so every snapshot
+descends from proven parts. Values are copied; ids like `std::string_view`
+alias their (static-storage) sources — the header scopes that claim
+precisely.
+
 ### A runtime-tunable sibling: mutable_total_map
 
 `emap::mutable_total_map<E, V>` (header `emap/mutable_total_map.h`, which

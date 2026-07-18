@@ -33,6 +33,16 @@ installed package declares (`COMPATIBILITY SameMinorVersion`), so
   one place. Full mutable surface, plus heterogeneous `==`/`!=` against a
   `total_map` baseline for drift checks. Deliberately absent: `transform`,
   any conversion back to `total_map`, and `all_unique` eligibility.
+- `emap::keyed_map<E, V, Proj>` — a `total_map` whose values are proven
+  distinct under a projection, in its own header `emap/keyed_map.h`: the
+  type-level carrier of an `emap::all_unique` proof. The projected result is
+  the value's ID, and proven-distinct ids license `find(id)` — the library's
+  one partial lookup, pointer-honest. Construction promotes an already-
+  proven `total_map` (implicit, consteval) or authors rows/arrays through
+  it; collisions are reported with both slots as template arguments
+  (`duplicate value` under the identity default, `values collide under
+  projection` under a real one). Acceptance is a predicate:
+  `emap::keyable<Arr | &Arr, Proj>`, subsuming `buildable`.
 - `emap::bijection<E1, E2>` — a proven bijection between two same-sized
   enums, in its own header `emap/bijection.h`. IS-A `total_map<E1, E2>`;
   construction additionally proves no E2 value repeats (equal counts are a
