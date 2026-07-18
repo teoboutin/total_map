@@ -41,6 +41,17 @@ installed package declares (`COMPATIBILITY SameMinorVersion`), so
   `inverse_at(E2)`, the runtime single-slot form, total so it returns by
   value. `bijection<E, E>` is a proven permutation. Acceptance is again a
   predicate: `emap::bijective<Arr | &Arr>`, subsuming `buildable`.
+- `emap::snapshot_map<K, V, N>` + `emap::join` — the first non-enum-indexed
+  table, in its own header `emap/snapshot_map.h`: a fully immutable
+  value-owning snapshot with proven-distinct keys of arbitrary literal type,
+  offering `find(id)` (partial, pointer-honest) and `size()`. It has NO
+  public validating constructor: its sole producer is
+  `emap::join(keyed_map, bijection, total_map)`, a consteval free function
+  whose signature is its entire proof — key distinctness from the keyed_map,
+  coverage from totality, and, from the bijection, the guarantee that the
+  snapshot is exactly the third table re-keyed by the first one's ids.
+  Values are copied; `std::string_view` ids alias their (static-storage)
+  sources, as documented in the header.
 
 ## [0.2.0] — 2026-07-17
 
