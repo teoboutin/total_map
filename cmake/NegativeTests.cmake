@@ -24,7 +24,8 @@ function(total_map_add_negative_tests)
         "keyed_missing_enumerator|enum value not covered"
         "bijection_repeated_value|enum value repeated"
         "bijection_count_mismatch|enum counts differ"
-        "bijection_missing_enumerator|enum value not covered")
+        "bijection_missing_enumerator|enum value not covered"
+        "snapshot_upstream_collision|values collide under projection")
 
     foreach(case IN LISTS cases)
         string(REPLACE "|" ";" parts "${case}")
