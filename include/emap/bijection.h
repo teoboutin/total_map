@@ -249,6 +249,32 @@ template <class E1, class E2> class bijection : public total_map<E1, E2>
     consteval bijection(Rows... rows) : bijection(base(rows...))
     {
     }
+
+    // SINGLE-SLOT inverse lookup — the proof's cheap half, without
+    // materializing the whole inverse map. constexpr, not consteval: runtime
+    // lookup of a compile-time-proven table is the point. Returns E1 BY
+    // VALUE — bijectivity makes the inverse TOTAL, so unlike keyed_map::find
+    // there is no partial case to be honest about. O(N) scan, nothing at
+    // enumerator counts.
+    //
+    // The debug assert mirrors operator[]'s: a forged E2 — a cast, or a
+    // Count sentinel used as a live value — asserts under !NDEBUG; in
+    // release the scan returns a well-defined but WRONG key for a forged
+    // value, which is an array's contract stated for the value side.
+    constexpr E1 inverse_at(E2 v) const
+    {
+        assert(static_cast<std::size_t>(v) < base::size() &&
+               "emap::bijection: value out of range (a sentinel used as a live value?)");
+        for (std::size_t i = 0; i + 1 < base::size(); ++i) {
+            if ((*this)[base::key_at(i)] == v) {
+                return base::key_at(i);
+            }
+        }
+        // Not a guess: the proof says v IS some slot's value, and no earlier
+        // slot matched, so it is the last one's. (This is also what lets the
+        // function end without a control path the compiler must warn about.)
+        return base::key_at(base::size() - 1);
+    }
 };
 
 // Deduction guides, mirroring the base's own — both enums come off the rows
@@ -312,6 +338,13 @@ static_assert(kWiresFromArray == kWires);
 constexpr emap::bijection<Port, Pin> kWiresFromFn{emap::total_map<Port, Pin>::from(
     [](Port p) { return static_cast<Pin>((static_cast<int>(p) + 1) % 3); })};
 static_assert(kWiresFromFn[Port::A] == Pin::P1);
+
+// --- inverse_at: the single-slot inverse, licensed by the proof ---
+// Total, so by value — no pointer: bijectivity means every E2 value has
+// exactly one key, and the signature says so.
+static_assert(kWires.inverse_at(Pin::P0) == Port::B);
+static_assert(kWires.inverse_at(Pin::P1) == Port::C);
+static_assert(kWires.inverse_at(Pin::P2) == Port::A);
 
 // --- immutable, like the base: proofs must outlive their statement ---
 static_assert(!std::is_copy_assignable_v<emap::bijection<Port, Pin>>);
