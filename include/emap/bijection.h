@@ -231,6 +231,34 @@ template <class E1, class E2> class bijection : public total_map<E1, E2>
         return tm;
     }
 
+    // --- the tagged door: check-free construction of a PROVEN inverse ---
+    // Every other constructor proves; this one is HANDED a proof. The
+    // inverse of a proven bijection is proven by the same evidence — one set
+    // of N distinct pairs, read the other way — so re-running the check here
+    // would not add safety, it would state that the proof is doubted. The
+    // door stays invisible from outside: tag and constructor are private,
+    // reachable only through the friendship below, so the public invariant —
+    // every reachable constructor proves — survives.
+    //
+    // The BASE is not opened at all: total_map::from is already the
+    // check-free totality path (a function cannot lie), and the callable
+    // below is total over E1 by its type. What this door skips is only the
+    // value-distinctness RE-check. O(N^2) consteval work (N inverse_at
+    // scans) — nothing at enumerator counts.
+    struct proven_inverse_t {};
+
+    // ALL specializations are friends, deliberately: bijection<E2, E1> must
+    // reach this constructor from ITS inverse(), the one-line spelling is
+    // fully portable where one-off mutual friendship risks toolchain
+    // divergence, and the door it widens is still private. E1 == E2 makes
+    // this self-friendship — harmless.
+    template <class, class> friend class bijection;
+
+    consteval bijection(proven_inverse_t, const bijection<E2, E1>& forward)
+        : base(base::from([&forward](E1 key) { return forward.inverse_at(key); }))
+    {
+    }
+
   public:
     // PROMOTE — the primary constructor: an already-proven total_map, with
     // the value-distinctness check run before the base is initialized.
@@ -274,6 +302,17 @@ template <class E1, class E2> class bijection : public total_map<E1, E2>
         // slot matched, so it is the last one's. (This is also what lets the
         // function end without a control path the compiler must warn about.)
         return base::key_at(base::size() - 1);
+    }
+
+    // THE OPERATION THE PROOF LICENSES: the whole map, read the other way,
+    // O(1) in both directions once materialized. consteval, like every
+    // construction path — materializing a map IS construction. Enters
+    // bijection<E2, E1> through its private tagged door (above): no check
+    // re-runs, because none could fail.
+    consteval bijection<E2, E1> inverse() const
+    {
+        using inverse_type = bijection<E2, E1>;
+        return inverse_type(typename inverse_type::proven_inverse_t{}, *this);
     }
 };
 
@@ -345,6 +384,43 @@ static_assert(kWiresFromFn[Port::A] == Pin::P1);
 static_assert(kWires.inverse_at(Pin::P0) == Port::B);
 static_assert(kWires.inverse_at(Pin::P1) == Port::C);
 static_assert(kWires.inverse_at(Pin::P2) == Port::A);
+
+// --- inverse(): the licensed operation — round trip over every key ---
+constexpr auto kUnwires = kWires.inverse();
+static_assert(std::is_same_v<decltype(kUnwires), const emap::bijection<Pin, Port>>);
+static_assert([] {
+    for (Port p : decltype(kWires)::keys()) {
+        if (kUnwires[kWires[p]] != p) {
+            return false;
+        }
+    }
+    return true;
+}());
+static_assert([] {
+    for (Pin q : decltype(kUnwires)::keys()) {
+        if (kWires[kUnwires[q]] != q) {
+            return false;
+        }
+    }
+    return true;
+}());
+
+// inverse().inverse(): type and value identity
+static_assert(std::is_same_v<decltype(kUnwires.inverse()), emap::bijection<Port, Pin>>);
+static_assert(kUnwires.inverse() == kWires);
+
+// the materialized inverse and the single-slot form agree
+static_assert(kUnwires[Pin::P0] == kWires.inverse_at(Pin::P0));
+
+// --- a permutation: E1 == E2 is a legal, useful bijection ---
+enum class Ring { R0, R1, R2, Count };
+constexpr emap::bijection kSucc{
+    entry{Ring::R0, Ring::R1}, entry{Ring::R1, Ring::R2}, entry{Ring::R2, Ring::R0}};
+static_assert(std::is_same_v<decltype(kSucc), const emap::bijection<Ring, Ring>>);
+static_assert(kSucc.inverse_at(Ring::R1) == Ring::R0); // the predecessor
+constexpr auto kPred = kSucc.inverse();
+static_assert(kPred[Ring::R0] == Ring::R2);
+static_assert(kPred.inverse() == kSucc);
 
 // --- immutable, like the base: proofs must outlive their statement ---
 static_assert(!std::is_copy_assignable_v<emap::bijection<Port, Pin>>);
