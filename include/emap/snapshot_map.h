@@ -257,6 +257,10 @@ join(const keyed_map<E1, V1, P1>& a, const bijection<E1, E2>& b,
 // ============================================================================
 #ifdef TOTAL_MAP_SELFTEST
 #include <string_view>
+// The refusal checks below need the mutable sibling IN THE TEST TU; the
+// header proper never touches it — refinements build on the immutable
+// total_map only.
+#include "mutable_total_map.h"
 namespace emap::selftest
 {
 
@@ -289,6 +293,43 @@ static_assert(kSnap.find(100)->gain == 5); // J0 -> Mid
 static_assert(kSnap.find(200)->gain == 1); // J1 -> Lo
 static_assert(kSnap.find(300)->gain == 9); // J2 -> Hi
 static_assert(kSnap.find(42) == nullptr);
+
+// --- string_view ids: the supported aliasing case (static storage) ---
+struct Badge {
+    const char* name;
+};
+constexpr emap::keyed_map<Jack, Badge,
+    [](const Badge& b) { return std::string_view{b.name}; }>
+    kBadges{entry{Jack::J0, Badge{"alpha"}}, entry{Jack::J1, Badge{"beta"}},
+            entry{Jack::J2, Badge{"gamma"}}};
+constexpr auto kByName = emap::join(kBadges, kLink, kConfs);
+static_assert(std::is_same_v<decltype(kByName),
+                             const emap::snapshot_map<std::string_view, Conf, 3>>);
+static_assert(kByName.find(std::string_view{"beta"})->gain == 1);
+static_assert(kByName.find(std::string_view{"delta"}) == nullptr);
+
+// --- the surface is sealed: join is the sole producer ---
+using Snap = emap::snapshot_map<int, Conf, 3>;
+static_assert(std::is_copy_constructible_v<Snap>); // join returns by value...
+static_assert(std::is_move_constructible_v<Snap>); // ...and a copy stays proven
+static_assert(!std::is_default_constructible_v<Snap>);
+// no public validating construction: raw parallel arrays are refused
+static_assert(!std::is_constructible_v<Snap, std::array<int, 3>, std::array<Conf, 3>>);
+static_assert(!std::is_copy_assignable_v<Snap>);
+static_assert(!std::is_move_assignable_v<Snap>);
+
+// --- mutable tables are refused BY SIGNATURE, at every position ---
+// Through concepts, necessarily: a requires-expression OUTSIDE a templated
+// entity hard-errors on an invalid expression instead of answering false —
+// only substitution into a template gets the failure-tolerant reading.
+template <class T>
+concept join_accepts_as_m2 = requires(const T& t) { emap::join(kPatches, kLink, t); };
+template <class T>
+concept join_accepts_as_a = requires(const T& t) { emap::join(t, kLink, kConfs); };
+static_assert(join_accepts_as_m2<emap::total_map<Amp, Conf>>); // the real type passes...
+static_assert(join_accepts_as_a<emap::keyed_map<Jack, Patch, &Patch::wire>>);
+static_assert(!join_accepts_as_m2<emap::mutable_total_map<Amp, Conf>>); // ...a live one never
+static_assert(!join_accepts_as_a<emap::mutable_total_map<Jack, Patch>>);
 
 } // namespace emap::selftest
 #endif // TOTAL_MAP_SELFTEST

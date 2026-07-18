@@ -463,9 +463,9 @@ static_assert(std::is_same_v<decltype(kPromoted), const emap::keyed_map<Gem, int
 static_assert(*kPromoted.find(11) == 11);
 
 // authoring through from(): the promote path composes, no from() of its own
-constexpr emap::keyed_map<Gem, int> kFromFn{
+constexpr emap::keyed_map<Gem, int> kKeyedFromFn{
     emap::total_map<Gem, int>::from([](Gem g) { return (static_cast<int>(g) + 1) * 11; })};
-static_assert(kFromFn == kCodes);
+static_assert(kKeyedFromFn == kCodes);
 
 // --- a projected id: a pointer to data member ---
 // The labels are NOT distinct — irrelevant, and the point: only the
