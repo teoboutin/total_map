@@ -33,6 +33,14 @@ installed package declares (`COMPATIBILITY SameMinorVersion`), so
   one place. Full mutable surface, plus heterogeneous `==`/`!=` against a
   `total_map` baseline for drift checks. Deliberately absent: `transform`,
   any conversion back to `total_map`, and `all_unique` eligibility.
+- `emap::bijection<E1, E2>` — a proven bijection between two same-sized
+  enums, in its own header `emap/bijection.h`. IS-A `total_map<E1, E2>`;
+  construction additionally proves no E2 value repeats (equal counts are a
+  `static_assert`), which licenses `inverse()` — the whole map read the
+  other way, materialized at compile time with no re-check — and
+  `inverse_at(E2)`, the runtime single-slot form, total so it returns by
+  value. `bijection<E, E>` is a proven permutation. Acceptance is again a
+  predicate: `emap::bijective<Arr | &Arr>`, subsuming `buildable`.
 
 ## [0.2.0] — 2026-07-17
 
