@@ -324,6 +324,29 @@ bijection(const std::array<entry<E1, E2>, M>&) -> bijection<E1, E2>;
 template <class E1, class E2, class... Rest>
 bijection(entry<E1, E2>, Rest...) -> bijection<E1, E2>;
 
+// ---------------------------------------------------------------------------
+// Acceptability predicate — a compile-time answer to "would bijection accept
+// this row set?", mirroring emap::buildable: the same two passing forms (by
+// value, restricted to NTTP-valid tables — enum rows always are; by pointer,
+// general), the same substitution-failure mechanism, and the same measured
+// portability rule — the CONSTRUCTION is the outermost call in the
+// bool_constant operand, and only the ARGUMENT goes through a helper (see
+// total_map.h). Unlike keyable, plain CTAD suffices: both enums come off the
+// rows, nothing is left to name.
+//
+// bijective SUBSUMES buildable: the construction it forces runs total_map's
+// key checks before the value check, so a table that would not even build is
+// bijective == false — one predicate answers for the whole construction.
+//
+// EDGE (documented in DIAGNOSTICS above): between enums of UNEQUAL COUNTS
+// this concept is a hard error, not false — the count check is a class-scope
+// static_assert, which fires at instantiation of the type, outside the
+// immediate context.
+// ---------------------------------------------------------------------------
+template <auto X>
+concept bijective =
+    requires { typename std::bool_constant<(bijection(detail::deref_if_ptr(X)), true)>; };
+
 } // namespace emap
 
 // ============================================================================
@@ -425,6 +448,30 @@ static_assert(kPred.inverse() == kSucc);
 // --- immutable, like the base: proofs must outlive their statement ---
 static_assert(!std::is_copy_assignable_v<emap::bijection<Port, Pin>>);
 static_assert(!std::is_move_assignable_v<emap::bijection<Port, Pin>>);
+
+// --- bijective: acceptance as a predicate, both passing forms ---
+constexpr auto kWireRowsOk = std::array{
+    entry{Port::A, Pin::P0}, entry{Port::B, Pin::P1}, entry{Port::C, Pin::P2}};
+constexpr auto kWireRowsRepeat = std::array{
+    entry{Port::A, Pin::P0}, entry{Port::B, Pin::P0}, entry{Port::C, Pin::P2}};
+constexpr auto kWireRowsPartial = std::array{entry{Port::A, Pin::P0}};
+static_assert(emap::bijective<kWireRowsOk>);
+static_assert(!emap::bijective<kWireRowsRepeat>); // a value repeated...
+static_assert(emap::buildable<kWireRowsRepeat>);  // ...on a table that BUILDS fine:
+                                                  // bijective is strictly stronger
+static_assert(!emap::bijective<kWireRowsPartial>); // and it subsumes buildable —
+static_assert(!emap::buildable<kWireRowsPartial>); // a non-table is bijective false too
+
+// by pointer — the general form (enum values are NTTP-valid, so by-value
+// also works above; the pointer form is locked anyway, mirroring buildable)
+inline constexpr auto kWireRowsPtr = std::array{
+    entry{Port::A, Pin::P1}, entry{Port::B, Pin::P2}, entry{Port::C, Pin::P0}};
+static_assert(emap::bijective<&kWireRowsPtr>);
+
+// NOTE deliberately absent: no bijective test between count-mismatched
+// enums. That case is a class-scope static_assert, which HARD-ERRORS at
+// type instantiation rather than answering false (documented in
+// DIAGNOSTICS); tests/negative/bijection_count_mismatch.cpp pins it.
 
 } // namespace emap::selftest
 #endif // TOTAL_MAP_SELFTEST
