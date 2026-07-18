@@ -33,6 +33,35 @@ installed package declares (`COMPATIBILITY SameMinorVersion`), so
   one place. Full mutable surface, plus heterogeneous `==`/`!=` against a
   `total_map` baseline for drift checks. Deliberately absent: `transform`,
   any conversion back to `total_map`, and `all_unique` eligibility.
+- `emap::keyed_map<E, V, Proj>` — a `total_map` whose values are proven
+  distinct under a projection, in its own header `emap/keyed_map.h`: the
+  type-level carrier of an `emap::all_unique` proof. The projected result is
+  the value's ID, and proven-distinct ids license `find(id)` — the library's
+  one partial lookup, pointer-honest. Construction promotes an already-
+  proven `total_map` (implicit, consteval) or authors rows/arrays through
+  it; collisions are reported with both slots as template arguments
+  (`duplicate value` under the identity default, `values collide under
+  projection` under a real one). Acceptance is a predicate:
+  `emap::keyable<Arr | &Arr, Proj>`, subsuming `buildable`.
+- `emap::bijection<E1, E2>` — a proven bijection between two same-sized
+  enums, in its own header `emap/bijection.h`. IS-A `total_map<E1, E2>`;
+  construction additionally proves no E2 value repeats (equal counts are a
+  `static_assert`), which licenses `inverse()` — the whole map read the
+  other way, materialized at compile time with no re-check — and
+  `inverse_at(E2)`, the runtime single-slot form, total so it returns by
+  value. `bijection<E, E>` is a proven permutation. Acceptance is again a
+  predicate: `emap::bijective<Arr | &Arr>`, subsuming `buildable`.
+- `emap::snapshot_map<K, V, N>` + `emap::join` — the first non-enum-indexed
+  table, in its own header `emap/snapshot_map.h`: a fully immutable
+  value-owning snapshot with proven-distinct keys of arbitrary literal type,
+  offering `find(id)` (partial, pointer-honest) and `size()`. It has NO
+  public validating constructor: its sole producer is
+  `emap::join(keyed_map, bijection, total_map)`, a consteval free function
+  whose signature is its entire proof — key distinctness from the keyed_map,
+  coverage from totality, and, from the bijection, the guarantee that the
+  snapshot is exactly the third table re-keyed by the first one's ids.
+  Values are copied; `std::string_view` ids alias their (static-storage)
+  sources, as documented in the header.
 
 ## [0.2.0] — 2026-07-17
 

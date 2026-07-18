@@ -4,11 +4,11 @@
 
 function(total_map_add_negative_tests)
     # basename => expected diagnostic substring. Each substring is verified to
-    # lie within ONE physical source line of total_map.h; the longer messages are
+    # lie within ONE physical source line of its header; the longer messages are
     # multi-line literal concatenations, so a substring spanning lines would
     # never match. Compilers surface these via caret source echo — and clang
     # echoes only the caret's own line, which is why each message literal in
-    # total_map.h must start on the same line as its emap::error call.
+    # the headers must start on the same line as its emap::error call.
     set(cases
         "not_an_enum|E must be an enum type"
         "no_enum_count|trailing sentinel enumerator"
@@ -18,7 +18,14 @@ function(total_map_add_negative_tests)
         "too_many_rows|duplicate enum key"
         "key_out_of_range|enum key >= enum_count_v<E>"
         "mutable_duplicate_key|duplicate enum key"
-        "mutable_missing_enumerator|enum value not covered")
+        "mutable_missing_enumerator|enum value not covered"
+        "duplicate_value|duplicate value"
+        "projection_collision|values collide under projection"
+        "keyed_missing_enumerator|enum value not covered"
+        "bijection_repeated_value|enum value repeated"
+        "bijection_count_mismatch|enum counts differ"
+        "bijection_missing_enumerator|enum value not covered"
+        "snapshot_upstream_collision|values collide under projection")
 
     foreach(case IN LISTS cases)
         string(REPLACE "|" ";" parts "${case}")
