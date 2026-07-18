@@ -36,8 +36,8 @@ For finite equal-sized sets, total + injective implies surjective, so
    operations the proof licenses. No `basic_map<E, V, props...>`.
 2. **Every public operation is a claim; smaller surface = smaller proof
    burden.** YAGNI throughout: deliver minimal functionality first, extend
-   later if needed. Deferred features are listed in §6 — do not implement
-   them now.
+   later if needed. Deferred features are listed in §5 Step 4+ — do not
+   implement them now.
 3. **Checks happen at construction of exactly one type; combinators are
    check-free by signature.** `join`'s constraints ARE its proof — its body is
    array walks. Never add "convenience" overloads taking raw arrays to a
@@ -121,7 +121,15 @@ the stored E2 values — which, with equal counts, proves bijectivity.
 The injectivity check is structurally keyed_map's check with the identity
 projection over `V = E2`; do NOT inherit from `keyed_map<E1, E2>` for it —
 the diagnostic must be bijection's own (see below) and keyed_map would drag
-in `id_type`/`find` vocabulary that means something else here.
+in `id_type`/`find` vocabulary that means something else here. Write the
+unrolled walker AGAIN in bijection.h (a ~20-line twin of keyed_map's
+`check_against_earlier`/`check_all`), with a comment naming the twin —
+decided, do not factor a shared `detail::` helper: the walker's shape is
+pinned by the measured template-argument constraint (§4), so the twins
+cannot drift apart in substance, and locality preserves the include story
+(keyed_map.h and bijection.h each depend on total_map.h alone; a shared
+helper would either bloat total_map.h with refinement-only machinery or
+make one refinement include the other for vocabulary it must not expose).
 
 **The operation the proof licenses: `inverse()`.** Returns
 `bijection<E2, E1>`, O(1) both ways, materialized as a reversed
@@ -141,6 +149,20 @@ the header at the door itself. If mutual friendship between
 to re-running the check in inverse() (it cannot fail; cost is compile time
 only) and record the measurement in a comment.
 
+Two implementation notes that keep the door small. First, the BASE needs no
+new door: `total_map::from(fn)` is already the check-free totality path (a
+function cannot lie), so the tag constructor initializes its base with
+`total_map<E2, E1>::from` over the forward map's `inverse_at` (O(N²) at
+consteval — nothing at enumerator counts), skipping only the injectivity
+RE-check — total_map itself is not opened.
+Second, spell the friendship `template <class, class> friend class
+bijection;` — all specializations, one line, fully portable — which
+dissolves the mutual-friendship toolchain risk outright (keep the fallback
+above recorded in case). `E1 == E2` makes this self-friendship, which is
+harmless — and `bijection<E, E>` (a permutation) is a legal, useful
+instance of the type, not an edge to reject: the count static_assert holds
+trivially and inverse() returns the same type.
+
 **Also license:** `constexpr E1 inverse_at(E2) const` — single-slot inverse
 lookup without materializing the whole inverse map (assert-guarded like
 `operator[]`, since a forged E2 indexes out of bounds). Total, so it returns
@@ -157,7 +179,14 @@ enum_value_repeated(const char* why);` — first line contains the substring
 the *values* are enumerators of E2 and one is hit twice, so some E2 value is
 also necessarily missed — say so in the message). The count-mismatch case is
 a `static_assert`, not an `error::` call — it is a property of the types, not
-of the rows.
+of the rows. Resolved consequence (do not rediscover it): a class-scope
+static_assert fires at implicit instantiation of the TYPE, outside any
+immediate context, so `bijective<X>` on mismatched-count rows and any
+`std::is_constructible_v` probe are HARD ERRORS, not `false`. Accepted, with
+precedent — total_map's own E/V static_asserts behave the same way, and
+buildable documents comparable hard-error edges (NTTP validity). Keep the
+friendly static_assert, document this edge in the header next to
+`bijective`, and cover the rejection with the negative test alone.
 
 **Construction surface** (mirror keyed_map exactly): implicit consteval
 promote from `total_map<E1, E2>`; array + variadic sugar delegating through
@@ -171,10 +200,13 @@ outermost construction, subsumes `buildable`).
   `Color/Style`, `Stat`, `Hue`, `Gauge`, `Tone`, `Bare`, `Odd`, `Lane`,
   `Chan`, `Gem/Spec`; pick unused ones): round-trip
   `b.inverse()[b[e]] == e` for all keys; `inverse().inverse()` type and value
-  identity; CTAD; IS-A total_map (+ `all_unique` accepts, `==` reaches
-  through); immutability; `bijective` true/false/subsumes-buildable;
-  count-mismatch rejection via a `!std::is_constructible_v` or concept check
-  if expressible, else negative test only.
+  identity; a `bijection<E, E>` permutation (same enum both sides —
+  exercises self-friendship; e.g. a successor cycle, with `inverse_at`
+  agreeing with the predecessor); CTAD; IS-A total_map (+ `all_unique`
+  accepts, `==` reaches through); immutability; `bijective`
+  true/false/subsumes-buildable; count-mismatch rejection via negative test
+  only (resolved above: the class-scope static_assert makes every
+  concept/trait probe a hard error, so a `false` is not expressible).
 - `tests/selftest_bijection.cpp` driver (three-line, like the others).
 - Negative tests: `bijection_repeated_value.cpp` (expect
   `enum value repeated`), `bijection_count_mismatch.cpp` (expect a distinct
@@ -199,6 +231,13 @@ every snapshot descends from proven parts. Everything const:
   only). No sorted/binary-search path (invisible optimization, defer).
 - `size()`, and that is essentially all.
 
+Mirror total_map's static_asserts against snapshot_map's own name (K and V
+copy-constructible; K's equality bar is guaranteed upstream by keyed_map's
+`projects_comparably`, but assert it here anyway so a future direct
+constructor cannot regress the diagnostic). Copy CONSTRUCTION is kept and
+assignment deleted, like every immutable type in the library — join returns
+by value, which needs the copy/move constructors anyway.
+
 **`join`** — a consteval free function:
 
 ```cpp
@@ -210,13 +249,33 @@ join(const keyed_map<E1, V1, P1>& a,
 ```
 
 Semantics: for each E1 key `e`, the snapshot pairs `P1(a[e])` (the id) with
-`m2[b[e]]` (the value). **No validation in the body** — key distinctness came
-with `a`, count agreement with `b`, coverage with both bases; the signature
-is the entire proof (principle 3). V2 values are **copied** (snapshot
-decision: self-contained, may outlive inputs). Accepting a `keyed_map` /
-`bijection` argument also accepts anything derived — fine; accepting
-`mutable_total_map` anywhere is impossible by signature — verify with a
-selftest concept check.
+`m2[b[e]]` (the value). **No validation in the body** — the signature is the
+entire proof (principle 3). Be precise about which argument proves what: the
+snapshot's KEY distinctness comes from `a` ALONE (the keys are a's projected
+ids), and its coverage from the totality of all three arguments. The
+snapshot would be VALID with any total `total_map<E1, E2>` bridge — b's
+injectivity and the count equality are never consumed by the validity
+argument. `bijection` is demanded anyway, and the demand is SEMANTIC: it
+guarantees the snapshot is exactly `m2` re-keyed by a's ids — every row of
+m2 represented exactly once, nothing dropped, nothing duplicated, where a
+merely-total bridge could hit one E2 row twice and silently miss another.
+State this guarantee, and that it is the reason for the strong signature, in
+the header where join is documented; do NOT present bijectivity as needed
+for key distinctness — that claim is false, and a reader who checks it will
+stop trusting the register. V2 values are **copied** (self-contained on the
+value side, may outlive inputs — scoped by the id-aliasing caveat below).
+Accepting a `keyed_map` / `bijection` argument also accepts anything
+derived — fine; accepting `mutable_total_map` anywhere is impossible by
+signature — verify with a selftest concept check.
+
+**Id-aliasing caveat (goes in the header).** "Self-contained" is scoped to
+the VALUES. The snapshot's KEYS are projected ids, and the flagship id form
+is `std::string_view`, which aliases storage it does not own: ids pointing
+into string literals or a namespace-scope constexpr table are fine (static
+storage), and constant evaluation keeps a genuine dangle loud — a pointer
+into a vanished temporary is not a constant expression — but the header must
+scope its outliving claim accordingly, in the same register as total_map's
+entries()-dangling note.
 
 Note `join` produces the snapshot through a private constructor +
 friendship, same tagged-door reasoning as `inverse()` — document it there
@@ -225,7 +284,8 @@ too.
 **Tests.** Selftests: a 3-enum worked example (wire enum ↔ internal enum ↔
 config struct) asserting id→V2 hits/misses at compile time; runtime `find`
 through the consumer test; `is_constructible` checks proving the snapshot has
-no public constructors, no assignment, no mutable access; a
+no public VALIDATING constructors (copy/move construction stays — see
+above), no assignment, no mutable access; a
 `static_assert`-level check that join's result type is exact. Negative tests:
 none needed of join itself (it cannot fail — assert that in a comment), but
 keep one showing a collision is caught **upstream** at keyed_map
@@ -275,3 +335,7 @@ predicate. Each is a pure addition later; adding any now violates §2.2.
   static_asserts — assert through the dereference instead.)
 - README: update once per shipped step (a section per header, in the
   existing register), or batch at the end — author's call.
+- CHANGELOG.md: an entry per shipped step, in the existing entries'
+  register; version macros bump per docs/releasing.md (one MINOR for the
+  whole feature set or one per step — author's call, but say which in the
+  shipping commit).
