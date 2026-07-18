@@ -19,10 +19,11 @@ function(total_map_add_test_matrix)
         endif()
 
         foreach(mode IN ITEMS debug ndebug)
-            # Two TUs per cell: the flagship header standalone, and the
-            # mutable sibling (which transitively re-proves the flagship's
-            # selftests in a two-header TU).
-            foreach(tu IN ITEMS selftest selftest_mutable)
+            # One TU per header: the flagship standalone, then each sibling —
+            # every sibling TU transitively re-proves the flagship's selftests
+            # in a multi-header TU. (selftest_keyed joins here belatedly: it
+            # was omitted when keyed_map shipped.)
+            foreach(tu IN ITEMS selftest selftest_mutable selftest_keyed selftest_bijection)
                 set(target "${tu}_cxx${std}_${mode}")
                 add_executable(${target} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${tu}.cpp)
                 target_link_libraries(${target} PRIVATE emap::total_map)
@@ -70,26 +71,17 @@ function(total_map_add_test_matrix)
     # clang-cl accepts unknown flags with only a warning, which the probe passes
     # (the same trap documented on the standards loop above).
     if(NOT MSVC)
-        add_executable(selftest_no_exceptions ${CMAKE_CURRENT_SOURCE_DIR}/tests/selftest.cpp)
-        target_link_libraries(selftest_no_exceptions PRIVATE emap::total_map)
-        set_target_properties(selftest_no_exceptions PROPERTIES
-            CXX_STANDARD 20
-            CXX_STANDARD_REQUIRED ON
-            CXX_EXTENSIONS OFF)
-        target_compile_options(selftest_no_exceptions PRIVATE
-            -fno-exceptions -Wall -Wextra -Wpedantic -Werror)
-        add_test(NAME selftest.no_exceptions COMMAND selftest_no_exceptions)
-
-        add_executable(selftest_mutable_no_exceptions
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/selftest_mutable.cpp)
-        target_link_libraries(selftest_mutable_no_exceptions PRIVATE emap::total_map)
-        set_target_properties(selftest_mutable_no_exceptions PROPERTIES
-            CXX_STANDARD 20
-            CXX_STANDARD_REQUIRED ON
-            CXX_EXTENSIONS OFF)
-        target_compile_options(selftest_mutable_no_exceptions PRIVATE
-            -fno-exceptions -Wall -Wextra -Wpedantic -Werror)
-        add_test(NAME selftest_mutable.no_exceptions COMMAND selftest_mutable_no_exceptions)
+        foreach(tu IN ITEMS selftest selftest_mutable selftest_keyed selftest_bijection)
+            add_executable(${tu}_no_exceptions ${CMAKE_CURRENT_SOURCE_DIR}/tests/${tu}.cpp)
+            target_link_libraries(${tu}_no_exceptions PRIVATE emap::total_map)
+            set_target_properties(${tu}_no_exceptions PROPERTIES
+                CXX_STANDARD 20
+                CXX_STANDARD_REQUIRED ON
+                CXX_EXTENSIONS OFF)
+            target_compile_options(${tu}_no_exceptions PRIVATE
+                -fno-exceptions -Wall -Wextra -Wpedantic -Werror)
+            add_test(NAME ${tu}.no_exceptions COMMAND ${tu}_no_exceptions)
+        endforeach()
     endif()
 
     # Debug only - see tests/assert_death.cpp for why NDEBUG is not tested.

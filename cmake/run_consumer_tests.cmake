@@ -81,14 +81,17 @@ run_step("build find_package consumer"
     ${CMAKE_COMMAND} --build ${WORK_DIR}/find_package ${cfg_args})
 
 # --- Path 3: bare header copy ----------------------------------------------
-# The README's "just copy the header(s) into your project". Both files are
-# staged: mutable_total_map.h reaches its sibling by a quote-form include, so
-# the pair must relocate as one emap/ directory — which is exactly what this
-# path proves.
+# The README's "just copy the header(s) into your project". EVERY header is
+# staged: the siblings reach each other by quote-form includes, so the family
+# must relocate as one emap/ directory — which is exactly what this path
+# proves. A GLOB rather than a list, deliberately: a hand-written list went
+# stale the moment keyed_map.h shipped without joining it, and this path was
+# silently broken until the next full consumer run. The glob reads the
+# directory, so it self-maintains — same reasoning as the sentinel-read
+# enum_count.
+file(GLOB bare_headers ${SOURCE_DIR}/include/emap/*.h)
 file(MAKE_DIRECTORY ${WORK_DIR}/bare/emap)
-file(COPY ${SOURCE_DIR}/include/emap/total_map.h
-          ${SOURCE_DIR}/include/emap/mutable_total_map.h
-     DESTINATION ${WORK_DIR}/bare/emap)
+file(COPY ${bare_headers} DESTINATION ${WORK_DIR}/bare/emap)
 run_step("configure bare-copy consumer"
     ${CMAKE_COMMAND} ${gen_args} -S ${SOURCE_DIR}/tests/consumer/bare
     -B ${WORK_DIR}/bare-build -DTOTAL_MAP_SOURCE_DIR=${SOURCE_DIR}
