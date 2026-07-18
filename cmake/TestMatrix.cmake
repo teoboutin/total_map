@@ -23,7 +23,7 @@ function(total_map_add_test_matrix)
             # every sibling TU transitively re-proves the flagship's selftests
             # in a multi-header TU. (selftest_keyed joins here belatedly: it
             # was omitted when keyed_map shipped.)
-            foreach(tu IN ITEMS selftest selftest_mutable selftest_keyed selftest_bijection)
+            foreach(tu IN ITEMS selftest selftest_mutable selftest_keyed selftest_bijection selftest_snapshot)
                 set(target "${tu}_cxx${std}_${mode}")
                 add_executable(${target} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${tu}.cpp)
                 target_link_libraries(${target} PRIVATE emap::total_map)
@@ -71,7 +71,7 @@ function(total_map_add_test_matrix)
     # clang-cl accepts unknown flags with only a warning, which the probe passes
     # (the same trap documented on the standards loop above).
     if(NOT MSVC)
-        foreach(tu IN ITEMS selftest selftest_mutable selftest_keyed selftest_bijection)
+        foreach(tu IN ITEMS selftest selftest_mutable selftest_keyed selftest_bijection selftest_snapshot)
             add_executable(${tu}_no_exceptions ${CMAKE_CURRENT_SOURCE_DIR}/tests/${tu}.cpp)
             target_link_libraries(${tu}_no_exceptions PRIVATE emap::total_map)
             set_target_properties(${tu}_no_exceptions PROPERTIES
